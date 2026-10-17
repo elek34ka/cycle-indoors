@@ -1,0 +1,26 @@
+<workout_file>
+  <author>Cycle Indoors</author>
+  <name>Over-unders 3 x 9</name>
+  <description>Three nine-minute blocks alternating 90 seconds just over threshold with 90 seconds just under. A good test of ERG mode: the trainer has to change target every 90 seconds while you hold cadence.</description>
+  <sportType>bike</sportType>
+  <tags/>
+  <workout>
+    <Warmup Duration="600" PowerLow="0.45" PowerHigh="0.80">
+      <textevent timeoffset="30" message="Easy spin to start — let the legs wake up" duration="10"/>
+      <textevent timeoffset="480" message="Power is ramping now, settle into a rhythm" duration="10"/>
+    </Warmup>
+    <IntervalsT Repeat="3" OnDuration="30" OffDuration="30" OnPower="1.10" OffPower="0.45" Cadence="105" CadenceResting="85"/>
+    <SteadyState Duration="180" Power="0.50" Cadence="88"/>
+    <IntervalsT Repeat="3" OnDuration="90" OffDuration="90" OnPower="1.05" OffPower="0.95" Cadence="92"/>
+    <SteadyState Duration="300" Power="0.50" Cadence="88">
+      <textevent timeoffset="5" message="First block done — spin it out" duration="10"/>
+    </SteadyState>
+    <IntervalsT Repeat="3" OnDuration="90" OffDuration="90" OnPower="1.05" OffPower="0.95" Cadence="92"/>
+    <SteadyState Duration="300" Power="0.50" Cadence="88"/>
+    <IntervalsT Repeat="3" OnDuration="90" OffDuration="90" OnPower="1.05" OffPower="0.95" Cadence="92"/>
+    <FreeRide Duration="300">
+      <textevent timeoffset="5" message="Free ride — choose your own effort" duration="10"/>
+    </FreeRide>
+    <Cooldown Duration="420" PowerLow="0.65" PowerHigh="0.40"/>
+  </workout>
+</workout_file>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cycle Indoors</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚴</text></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">Cycle<span>Indoors</span></div>
+        <nav class="tabs" id="tabs">
+          <button type="button" data-tab="ride" class="active">Ride</button>
+          <button type="button" data-tab="settings">Settings</button>
+        </nav>
+        <div class="topbar-right">
+          <div class="chips" id="device-chips"></div>
+        </div>
+      </header>
+
+      <main>
+        <section class="view view-ride active" id="view-ride">
+          <aside class="panel sidebar">
+            <div class="panel-head">
+              <span>Workout</span>
+              <button type="button" class="btn btn-small" id="pick-workout">Load file</button>
+            </div>
+            <div class="drop-zone" id="workout-drop">
+              <strong>Drop a .zwo or .fit workout</strong>
+              <span>or pick one from the library</span>
+            </div>
+            <select id="library-select" class="select"></select>
+            <div id="workout-meta" class="workout-meta"></div>
+            <ol id="segment-list" class="segment-list"></ol>
+
+            <div class="panel-head panel-head-spaced">
+              <span>Route</span>
+              <button type="button" class="btn btn-small" id="pick-route">Load file</button>
+            </div>
+            <div class="drop-zone" id="route-drop">
+              <strong>Drop a .gpx or .fit ride</strong>
+              <span>for the map and elevation profile</span>
+            </div>
+            <div id="route-stats" class="route-stats"></div>
+          </aside>
+
+          <div class="ride-main">
+            <div class="metrics" id="metrics"></div>
+            <div class="interval-bar" id="interval-bar"></div>
+            <div class="graph-stack" id="graph-stack">
+              <div class="graph-wrap">
+                <canvas id="profile"></canvas>
+                <div class="graph-message" id="graph-message"></div>
+                <div class="mini-map-host" id="mini-map-host"></div>
+              </div>
+              <div class="elevation-wrap">
+                <canvas id="elevation"></canvas>
+              </div>
+            </div>
+            <div class="controls" id="controls"></div>
+          </div>
+        </section>
+
+        <section class="view view-settings" id="view-settings">
+          <div class="settings-stack">
+            <div class="panel settings-panel" id="settings-form"></div>
+            <div class="panel settings-panel" id="devices-panel"></div>
+          </div>
+        </section>
+      </main>
+
+      <div class="overlay hidden" id="summary-overlay"></div>
+      <div id="toasts" class="toasts"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
