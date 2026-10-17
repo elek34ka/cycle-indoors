@@ -4,6 +4,7 @@ import { buildActivityFit, downloadBytes } from '../activity/fit-export';
 import { computeMetrics } from '../session/metrics';
 import { session, type SessionSnapshot } from '../session/session';
 import { clear, el, qs, toast } from './dom';
+import { confirmDialog } from './confirm';
 
 function cell(label: string, value: string, note?: string): HTMLElement {
   return el('div', { class: 'cell' }, [
@@ -79,6 +80,8 @@ export function showSummary(snapshot: SessionSnapshot): void {
         try {
           const bytes = buildActivityFit({ startedAt, samples, laps: snapshot.laps, metrics, name: title });
           downloadBytes(bytes, `cycle-indoors-${fileStamp(startedAt)}.fit`);
+          // The ride can now be discarded without losing it.
+          session.markExported();
           toast('FIT file downloaded — upload it to Strava or intervals.icu.');
           if (metrics.hasPosition) toast('The file carries the route’s GPS track, so it will show a map.');
         } catch (err) {
@@ -94,7 +97,18 @@ export function showSummary(snapshot: SessionSnapshot): void {
       class: 'btn',
       text: 'New ride',
       on: {
-        click: () => {
+        click: async () => {
+          if (samples.length > 0 && !session.exported) {
+            const confirmed = await confirmDialog({
+              title: 'Discard this ride?',
+              message: `${hhmmss(metrics.duration)} of riding has not been downloaded. `
+                + 'Starting a new ride will throw it away.',
+              confirmText: 'Discard and start new',
+              cancelText: 'Keep this ride',
+              danger: true,
+            });
+            if (!confirmed) return;
+          }
           session.reset();
           hideSummary();
         },

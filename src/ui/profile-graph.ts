@@ -7,6 +7,8 @@ import type { SessionSnapshot } from '../session/session';
 const PADDING = { top: 14, right: 56, bottom: 22, left: 46 };
 /** Free-ride window when no workout is loaded, in seconds. */
 const FREE_WINDOW = 600;
+/** Granularity by which the axis grows when riding past the workout's end. */
+const OVERRUN_STEP = 300;
 
 interface Hover { x: number; y: number; }
 
@@ -78,7 +80,13 @@ export class ProfileGraph {
   }
 
   private domain(snapshot: SessionSnapshot): { from: number; to: number } {
-    if (this.workout) return { from: 0, to: Math.max(60, this.workout.duration) };
+    if (this.workout) {
+      // Riding on past the workout extends the axis, in five-minute steps so
+      // the blocks do not visibly shrink on every frame.
+      const overrun = Math.max(0, snapshot.elapsed - this.workout.duration);
+      const extra = Math.ceil(overrun / OVERRUN_STEP) * OVERRUN_STEP;
+      return { from: 0, to: Math.max(60, this.workout.duration + extra) };
+    }
     const to = Math.max(FREE_WINDOW, snapshot.elapsed + 60);
     return { from: Math.max(0, to - FREE_WINDOW), to };
   }
@@ -147,6 +155,23 @@ export class ProfileGraph {
 
     // --- recorded traces --------------------------------------------------
     this.drawTrace(snapshot, xOf, yOf, p, ftp);
+
+    // --- where the workout ended ------------------------------------------
+    if (this.workout && snapshot.elapsed > this.workout.duration) {
+      const x = xOf(this.workout.duration);
+      ctx.strokeStyle = 'rgba(63,192,122,0.6)';
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, p.y);
+      ctx.lineTo(x, p.y + p.h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(63,192,122,0.85)';
+      ctx.textAlign = 'left';
+      ctx.font = '10px ui-monospace, Menlo, monospace';
+      ctx.fillText('workout done', x + 4, p.y + 8);
+    }
 
     // --- progress cursor --------------------------------------------------
     if (snapshot.elapsed > 0 || snapshot.state !== 'idle') {

@@ -10,6 +10,7 @@ import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
 import type { Workout } from '../workout/types';
 import { clear, el, qs, setClass, setText, toast } from './dom';
+import { confirmDialog } from './confirm';
 import { ElevationGraph } from './elevation-graph';
 import { MiniMap } from './mini-map';
 import { ProfileGraph } from './profile-graph';
@@ -99,7 +100,10 @@ const TILES: TileSpec[] = [
     key: 'time',
     label: () => 'Elapsed',
     value: (s) => hhmmss(s.elapsed),
-    sub: (s) => (s.remaining === undefined ? 'open ride' : `${hhmmss(s.remaining)} left`),
+    sub: (s) => {
+      if (s.workoutComplete) return 'workout done · free riding';
+      return s.remaining === undefined ? 'open ride' : `${hhmmss(s.remaining)} left`;
+    },
   },
 ];
 
@@ -184,7 +188,10 @@ export class RideView {
   private buildControls(): void {
     clear(this.controls);
 
-    this.startBtn = el('button', { class: 'btn btn-primary', text: 'Start', on: { click: () => session.toggle() } });
+    this.startBtn = el('button', {
+      class: 'btn btn-primary', text: 'Start',
+      on: { click: () => void this.pressStart() },
+    });
     const finish = el('button', { class: 'btn btn-danger', text: 'Finish', on: { click: () => session.finish() } });
     const lap = el('button', { class: 'btn', text: 'Lap', title: 'Mark a lap (L)', on: { click: () => session.markLap() } });
 
@@ -295,7 +302,7 @@ export class RideView {
       if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
       if (!qs('#view-ride').classList.contains('active')) return;
       switch (e.key) {
-        case ' ': e.preventDefault(); session.toggle(); break;
+        case ' ': e.preventDefault(); void this.pressStart(); break;
         case 'ArrowUp': e.preventDefault(); session.nudgeBias(0.01); break;
         case 'ArrowDown': e.preventDefault(); session.nudgeBias(-0.01); break;
         case 'ArrowRight': e.preventDefault(); session.seek(e.shiftKey ? 60 : 10); break;
@@ -308,6 +315,27 @@ export class RideView {
         default: break;
       }
     });
+  }
+
+  /**
+   * Start, pause, resume — or, on a finished ride, begin a new one. That last
+   * case throws the recorded ride away, so it asks first unless the rider has
+   * already downloaded it.
+   */
+  private async pressStart(): Promise<void> {
+    const s = session.snapshot;
+    if (s.state === 'finished' && s.samples.length > 0 && !s.exported) {
+      const keep = !(await confirmDialog({
+        title: 'Start a new ride?',
+        message: `This will discard ${hhmmss(s.samples.length)} of riding that has not been `
+          + 'downloaded. Download the .fit file first if you want to keep it.',
+        confirmText: 'Discard and start new',
+        cancelText: 'Keep this ride',
+        danger: true,
+      }));
+      if (keep) return;
+    }
+    session.toggle();
   }
 
   // ---- loading -------------------------------------------------------------
@@ -452,7 +480,11 @@ export class RideView {
       setClass(tile.root, 'accent', Boolean(stripe));
     }
 
-    setText(this.startBtn, s.state === 'running' ? 'Pause' : s.elapsed > 0 ? 'Resume' : 'Start');
+    setText(this.startBtn, s.state === 'running'
+      ? 'Pause'
+      : s.state === 'finished'
+        ? 'Start new ride'
+        : s.elapsed > 0 ? 'Resume' : 'Start');
     setClass(this.startBtn, 'btn-primary', s.state !== 'running');
 
     for (const [mode, btn] of this.modeButtons) setClass(btn, 'on', s.mode === mode);
@@ -486,6 +518,18 @@ export class RideView {
 
   private renderIntervalBar(s: SessionSnapshot): void {
     const bar = this.intervalBar;
+    if (s.workoutComplete) {
+      if (bar.dataset.built !== 'complete') {
+        clear(bar);
+        bar.append(
+          el('div', { class: 'mode-flag free', text: 'free' }),
+          el('div', { class: 'now', text: `${s.workout?.name ?? 'Workout'} complete — free riding` }),
+          el('div', { class: 'next', text: 'press Finish when you are done' }),
+        );
+        bar.dataset.built = 'complete';
+      }
+      return;
+    }
     if (!s.workout || !s.segment) {
       if (bar.dataset.built !== 'free') {
         clear(bar);
@@ -514,13 +558,14 @@ export class RideView {
   }
 
   private renderSegmentList(s: SessionSnapshot): void {
-    if (s.segmentIndex === this.renderedSegmentIndex) return;
-    this.renderedSegmentIndex = s.segmentIndex;
+    const index = s.workoutComplete ? this.segmentNodes.length : s.segmentIndex;
+    if (index === this.renderedSegmentIndex) return;
+    this.renderedSegmentIndex = index;
     this.segmentNodes.forEach((node, i) => {
-      setClass(node, 'current', i === s.segmentIndex);
-      setClass(node, 'done', i < s.segmentIndex);
+      setClass(node, 'current', i === index);
+      setClass(node, 'done', i < index);
     });
-    const current = this.segmentNodes[s.segmentIndex];
+    const current = this.segmentNodes[index];
     if (typeof current?.scrollIntoView === 'function') current.scrollIntoView({ block: 'nearest' });
   }
 }

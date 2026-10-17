@@ -17,7 +17,7 @@ live in `localStorage`; rides are kept in memory until you download them.
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # 551 checks, no browser needed
+npm test           # 577 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -60,9 +60,18 @@ tablet on the same network you would need to serve the app over https.
   `M`) on OpenStreetMap streets by default, with a dark basemap available. In
   free mode, "Follow route" hands the course's gradient to the trainer instead
   of the slider.
+- **The end of a workout is not the end of the ride** — when the last block
+  runs out the workout hands over to free riding: the clock keeps going, the
+  trainer switches from the ERG target to the gradient, a lap is closed at the
+  boundary and the graph's axis extends with a marker where the workout ended.
+  The ride finishes when you say so. Seeking backwards puts you back into the
+  workout and ERG resumes.
 - **Controls** — start/pause, finish, lap, ERG bias ±, free-mode gradient,
   block skip and ±30 s seek, click-to-seek on the graph. Space (start/pause),
-  arrows (bias and seek), `L` (lap) and `M` (map) are bound.
+  arrows (bias and seek), `L` (lap) and `M` (map) are bound. On a finished ride
+  the start button reads **Start new ride** and asks before discarding a ride
+  that has not been downloaded — once you have saved the `.fit`, it stops
+  asking.
 - **A simulated rider** — a first-order leg model that chases the ERG target,
   with cadence, heart-rate lag and speed from a real power/aero/gravity model.
   The mock devices implement exactly the same `Device` interface the Bluetooth

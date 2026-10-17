@@ -197,12 +197,45 @@ suite('a loaded route drives the ride', () => {
     String(courseSnap.coursePosition!.totalAscent));
 });
 
-session.seek(session.snapshot.workout!.duration - 1.5);
-await wait(2200);
+const workoutDuration = session.snapshot.workout!.duration;
+const lapsBeforeEnd = session.snapshot.laps.length;
+session.seek(workoutDuration - 1.5);
+await wait(2600);
+const overrun = session.snapshot;
+const overrunRigMode = mock.rig.mode;
+
+suite('the workout hands over to free riding instead of ending the ride', () => {
+  check('the ride is still running', overrun.state === 'running', overrun.state);
+  check('the workout is marked complete', overrun.workoutComplete === true);
+  check('the clock has run past the workout', overrun.elapsed > workoutDuration,
+    `${overrun.elapsed} vs ${workoutDuration}`);
+  check('there is no block any more', overrun.segment === undefined);
+  check('and no ERG target', overrun.targetPower === 0, String(overrun.targetPower));
+  check('the ride is free even though the toggle says ERG',
+    overrun.mode === 'erg' && overrun.effectiveMode === 'free', `${overrun.mode}/${overrun.effectiveMode}`);
+  check('the trainer was switched to simulation', overrunRigMode === 'sim', overrunRigMode);
+  check('a lap was closed at the boundary', overrun.laps.length > lapsBeforeEnd,
+    `${lapsBeforeEnd} → ${overrun.laps.length}`);
+  check('recording carried on past the end',
+    overrun.samples.some((x) => x.t > workoutDuration), String(overrun.samples.length));
+  check('the rider was told', overrun.message?.includes('free riding') ?? false,
+    overrun.message ?? 'no message');
+  check('the interval bar says the workout is complete',
+    doc.querySelector('#interval-bar .now')?.textContent?.includes('complete') ?? false,
+    doc.querySelector('#interval-bar .now')?.textContent ?? 'none');
+  check('the time tile says so too', tile(6).sub === 'workout done · free riding', tile(6).sub);
+  check('every block is marked done',
+    doc.querySelectorAll('#segment-list li.done').length === overrun.workout!.segments.length,
+    String(doc.querySelectorAll('#segment-list li.done').length));
+  check('and none is current', doc.querySelectorAll('#segment-list li.current').length === 0);
+});
+
+session.finish();
+await wait(120);
 
 suite('finishing', () => {
   const s = session.snapshot;
-  check('the ride finished on its own at the end of the workout', s.state === 'finished', s.state);
+  check('the ride is finished', s.state === 'finished', s.state);
   check('the trainer target was released', mock.rig.targetPower === 0, String(mock.rig.targetPower));
   check('the summary overlay is showing', !doc.querySelector('#summary-overlay')?.classList.contains('hidden'));
   const summaryText = doc.querySelector('#summary-overlay')?.textContent ?? '';
@@ -211,6 +244,63 @@ suite('finishing', () => {
     summaryText.includes('TSS') && summaryText.includes('Normalised'));
   check('laps were created from the workout blocks', s.laps.length >= 1, String(s.laps.length));
 });
+
+// --- starting a new ride must not quietly discard this one ------------------
+hideSummary();
+const startButton = () => Array.from(doc.querySelectorAll<HTMLButtonElement>('#controls button'))
+  .find((b) => b.textContent === 'Start new ride');
+const confirmOverlay = () => doc.querySelector('.confirm-overlay');
+const clickIn = (root: Element, label: string) =>
+  Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === label)?.click();
+
+const finishedSamples = session.snapshot.samples.length;
+const labelWhenFinished = startButton()?.textContent;
+startButton()?.click();
+await wait(30);
+const askedBeforeDiscard = confirmOverlay() !== null;
+const confirmText = confirmOverlay()?.textContent ?? '';
+if (confirmOverlay()) clickIn(confirmOverlay()!, 'Keep this ride');
+await wait(30);
+
+suite('a finished ride asks before being thrown away', () => {
+  check('the button says what it will do', labelWhenFinished === 'Start new ride', labelWhenFinished ?? 'none');
+  check('it asked first', askedBeforeDiscard);
+  check('explaining that the ride has not been downloaded',
+    /not been downloaded/.test(confirmText), confirmText.slice(0, 120));
+  check('cancelling closed the dialog', confirmOverlay() === null);
+  check('and kept the ride', session.snapshot.state === 'finished', session.snapshot.state);
+  check('with its data intact', session.snapshot.samples.length === finishedSamples,
+    `${finishedSamples} → ${session.snapshot.samples.length}`);
+});
+
+startButton()?.click();
+await wait(30);
+if (confirmOverlay()) clickIn(confirmOverlay()!, 'Discard and start new');
+await wait(60);
+
+suite('confirming starts a fresh ride', () => {
+  check('the dialog closed', confirmOverlay() === null);
+  check('a new ride is running', session.snapshot.state === 'running', session.snapshot.state);
+  check('from the beginning', session.snapshot.elapsed < 2, String(session.snapshot.elapsed));
+  check('with the old ride discarded', session.snapshot.samples.length < finishedSamples,
+    String(session.snapshot.samples.length));
+});
+
+session.finish();
+await wait(60);
+hideSummary();
+session.markExported();
+startButton()?.click();
+await wait(40);
+
+suite('a ride that has been downloaded is discarded without asking', () => {
+  check('no confirmation was needed', confirmOverlay() === null);
+  check('and the new ride started', session.snapshot.state === 'running', session.snapshot.state);
+});
+
+session.finish();
+await wait(60);
+hideSummary();
 
 suite('the recorded ride exports as a valid FIT file', () => {
   const s = session.snapshot;

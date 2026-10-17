@@ -540,6 +540,11 @@ input[type="number"], input[type="text"] {
 
 .summary-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
+.confirm-overlay { z-index: 50; }
+.confirm-card { width: min(440px, 100%); gap: 14px; }
+.confirm-card h2 { font-size: 17px; }
+.confirm-card p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+
 
 .device-list { display: grid; gap: 8px; }
 

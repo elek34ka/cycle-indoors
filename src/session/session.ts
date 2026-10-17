@@ -43,6 +43,10 @@ export interface SessionSnapshot {
   /** the gradient actually sent to the trainer (the course's, when following one) */
   effectiveGrade: number;
   followCourse: boolean;
+  /** the workout has run out and the ride has carried on as a free ride */
+  workoutComplete: boolean;
+  /** whether this ride's data has been written out to a .fit file */
+  exported: boolean;
   /** false when no connected trainer accepts commands — ERG is then advisory */
   canControlTrainer: boolean;
   coursePosition?: CoursePosition;
@@ -92,6 +96,8 @@ class CommandQueue {
 
 const SAMPLE_INTERVAL = 1; // second
 const BUFFER_SECONDS = 31;
+const WORKOUT_DONE_MESSAGE = 'Workout complete — free riding from here';
+const WORKOUT_DONE_SECONDS = 12;
 
 interface RunningTotals { power: number; powerCount: number; hr: number; hrCount: number; }
 
@@ -119,6 +125,7 @@ export class Session extends Emitter<SessionEvents> {
   private nextSampleAt = SAMPLE_INTERVAL;
   private segmentIndex = -1;
   private completedLoops = 0;
+  private pastWorkoutEnd = false;
   private hadControl = false;
   private lastTargetSent: number | undefined;
   private lastGradeSent: number | undefined;
@@ -128,6 +135,8 @@ export class Session extends Emitter<SessionEvents> {
   private commands = new CommandQueue(500);
   private raf: number | undefined;
   startedAt: Date | undefined;
+  /** set once the rider has downloaded this ride, so it can be discarded safely */
+  exported = false;
 
   constructor(private readonly devices: DeviceHub) {
     super();
@@ -138,9 +147,12 @@ export class Session extends Emitter<SessionEvents> {
   // ---- queries -------------------------------------------------------------
 
   get snapshot(): SessionSnapshot {
-    const segment = this.workout ? segmentAt(this.workout, this.elapsed) : undefined;
+    // Past the last block the workout is over, but the ride is not: it carries
+    // on as a free ride until the rider finishes it.
+    const complete = this.workout !== undefined && this.elapsed >= this.workout.duration;
+    const segment = this.workout && !complete ? segmentAt(this.workout, this.elapsed) : undefined;
     const next = segment && this.workout ? this.workout.segments[segment.index + 1] : undefined;
-    const effectiveMode: RideMode = this.mode === 'free' ? 'free' : (segment?.mode ?? 'free');
+    const effectiveMode: RideMode = this.mode === 'free' || complete ? 'free' : (segment?.mode ?? 'free');
     const coursePosition = courseStore.current?.at(this.distance);
     const courseGrade = this.follow ? coursePosition?.gradient : undefined;
 
@@ -150,7 +162,7 @@ export class Session extends Emitter<SessionEvents> {
       effectiveMode,
       workout: this.workout,
       elapsed: this.elapsed,
-      remaining: this.workout ? Math.max(0, this.workout.duration - this.elapsed) : undefined,
+      remaining: this.workout && !complete ? Math.max(0, this.workout.duration - this.elapsed) : undefined,
       segment,
       segmentIndex: segment?.index ?? -1,
       segmentElapsed: segment ? this.elapsed - segment.start : 0,
@@ -170,6 +182,8 @@ export class Session extends Emitter<SessionEvents> {
       grade: this.grade,
       effectiveGrade: courseGrade ?? this.grade,
       followCourse: this.follow,
+      workoutComplete: complete,
+      exported: this.exported,
       canControlTrainer: this.devices.control !== undefined,
       coursePosition,
       message: this.message,
@@ -180,6 +194,8 @@ export class Session extends Emitter<SessionEvents> {
 
   targetPower(): number {
     if (!this.workout || this.mode === 'free') return 0;
+    // The workout is done; the brake follows the gradient now, not a target.
+    if (this.elapsed >= this.workout.duration) return 0;
     const segment = segmentAt(this.workout, this.elapsed);
     if (!segment || segment.mode === 'free') return 0;
     const ratio = targetRatioAt(segment, this.elapsed);
@@ -209,6 +225,7 @@ export class Session extends Emitter<SessionEvents> {
     this.workout = workout;
     this.elapsed = 0;
     this.segmentIndex = -1;
+    this.pastWorkoutEnd = false;
     this.firedEvents.clear();
     this.nextSampleAt = SAMPLE_INTERVAL;
     if (this.state !== 'idle') this.resetRide();
@@ -265,6 +282,8 @@ export class Session extends Emitter<SessionEvents> {
     this.nextSampleAt = SAMPLE_INTERVAL;
     this.segmentIndex = -1;
     this.completedLoops = 0;
+    this.pastWorkoutEnd = false;
+    this.exported = false;
     this.lastTargetSent = undefined;
     this.lastGradeSent = undefined;
     this.firedEvents.clear();
@@ -309,7 +328,9 @@ export class Session extends Emitter<SessionEvents> {
 
   seek(seconds: number): void {
     if (!this.workout) return;
-    this.jumpTo(clamp(this.elapsed + seconds, 0, this.workout.duration));
+    // Once the workout is over the clock has run past its duration, so allow
+    // seeking anywhere up to now — that is how the rider gets back into it.
+    this.jumpTo(clamp(this.elapsed + seconds, 0, Math.max(this.workout.duration, this.elapsed)));
   }
 
   skipSegment(direction: 1 | -1): void {
@@ -331,6 +352,12 @@ export class Session extends Emitter<SessionEvents> {
     this.elapsed = seconds;
     this.nextSampleAt = Math.ceil(seconds / SAMPLE_INTERVAL) * SAMPLE_INTERVAL;
     this.pushTrainerCommand(true);
+    this.emit('tick', this.snapshot);
+  }
+
+  /** Called once the rider has downloaded the ride, so discarding it is safe. */
+  markExported(): void {
+    this.exported = true;
     this.emit('tick', this.snapshot);
   }
 
@@ -370,17 +397,12 @@ export class Session extends Emitter<SessionEvents> {
       const speed = this.live.speed ?? 0;
       this.distance += (speed / 3.6) * dt;
 
+      this.detectWorkoutEnd();
       this.detectSegmentChange();
       this.detectCourseLoop();
       this.fireTextEvents();
       this.recordSamples();
       this.pushTrainerCommand(false);
-
-      if (this.workout && this.elapsed >= this.workout.duration) {
-        this.elapsed = this.workout.duration;
-        this.finish();
-        return;
-      }
     }
 
     if (this.message && now > this.messageUntil) this.message = undefined;
@@ -399,8 +421,28 @@ export class Session extends Emitter<SessionEvents> {
     while (buffer.length && buffer[0].t < cutoff) buffer.shift();
   }
 
+  /**
+   * Crossing the end of the workout, in either direction. The ride keeps going
+   * — ERG hands over to free riding — so this only switches the trainer over
+   * and marks the boundary with a lap.
+   */
+  private detectWorkoutEnd(): void {
+    const complete = this.workout !== undefined && this.elapsed >= this.workout.duration;
+    if (complete === this.pastWorkoutEnd) return;
+    this.pastWorkoutEnd = complete;
+    this.lastTargetSent = undefined;
+    this.lastGradeSent = undefined;
+    if (complete) {
+      this.closeLap('Free ride');
+      this.message = WORKOUT_DONE_MESSAGE;
+      this.messageUntil = performance.now() + WORKOUT_DONE_SECONDS * 1000;
+      this.emit('message', WORKOUT_DONE_MESSAGE);
+    }
+    this.pushTrainerCommand(true);
+  }
+
   private detectSegmentChange(): void {
-    if (!this.workout) return;
+    if (!this.workout || this.pastWorkoutEnd) return;
     const segment = segmentAt(this.workout, this.elapsed);
     const index = segment?.index ?? -1;
     if (index === this.segmentIndex) return;
