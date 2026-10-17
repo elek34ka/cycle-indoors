@@ -162,7 +162,7 @@ disagree. ERG and simulation cover every trainer this app has a use for.
 
 ### What is deliberately not here yet
 
-No Bluetooth (phase 2), no ride history or workout library persistence, no
+No ride history or workout library persistence, no
 account, no upload integrations, no calibration/spindown, no virtual-gear or
 steering support.
 
