@@ -2,6 +2,7 @@ import { hub } from '../devices/hub';
 import { registerMockDevices, mock } from '../devices/setup';
 import { restorePairedDevices } from '../devices/ble/pair';
 import { settings } from '../core/settings';
+import { keepScreenAwake } from '../core/wake-lock';
 import { session } from '../session/session';
 import { DevicesView } from './devices-view';
 import { RideView } from './ride-view';
@@ -15,6 +16,7 @@ export function bootApp(): void {
   new RideView((snapshot) => showSummary(snapshot));
   buildSettingsView();
   new DevicesView();
+  keepScreenAwake(navigator, document);
 
   const tabs = qs('#tabs');
   const buttons = Array.from(tabs.querySelectorAll<HTMLButtonElement>('button'));
@@ -23,6 +25,8 @@ export function bootApp(): void {
     for (const view of Array.from(document.querySelectorAll('.view'))) {
       view.classList.toggle('active', view.id === `view-${name}`);
     }
+    // the panel toggle only means something on the ride view
+    qs('#toggle-sidebar').classList.toggle('hidden', name !== 'ride');
   };
   tabs.addEventListener('click', (e) => {
     const button = (e.target as HTMLElement).closest('button');

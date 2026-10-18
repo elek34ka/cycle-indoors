@@ -13,6 +13,8 @@ export interface Settings {
   miniMapFollow: boolean;
   /** try to reconnect already-paired Bluetooth devices when the app loads */
   autoConnectBle: boolean;
+  /** the ride view's left panel (workout and route) */
+  showSidebar: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -26,6 +28,7 @@ const DEFAULTS: Settings = {
   showMiniMap: true,
   miniMapFollow: true,
   autoConnectBle: true,
+  showSidebar: true,
 };
 
 const KEY = 'cycle-indoors.settings.v1';

@@ -17,7 +17,7 @@ live in `localStorage`; rides are kept in memory until you download them.
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # 577 checks, no browser needed
+npm test           # 654 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -49,7 +49,8 @@ tablet on the same network you would need to serve the app over https.
   metres climbed and time. Power and heart rate show a 3-second average (the
   window is configurable) with the session and current-lap averages underneath.
   A canvas workout profile coloured by power zone carries your actual power and
-  heart rate over it; the current block is highlighted, with the next block and
+  heart rate over it, averaged over the same window as the tiles so the lines do
+  not jitter (the exported file keeps every raw second); the current block is highlighted, with the next block and
   a countdown.  Zwift-style text messages come from the workout file.
 - **Route as a course** — a loaded `.gpx`/`.fit` route gets its elevation
   smoothed over a 30 m window, then gradient and cumulative ascent precomputed.
@@ -60,6 +61,15 @@ tablet on the same network you would need to serve the app over https.
   `M`) on OpenStreetMap streets by default, with a dark basemap available. In
   free mode, "Follow route" hands the course's gradient to the trainer instead
   of the slider.
+- **Gradient-true speed on a route** — with a route loaded, your speed, your
+  position on it and the speed/distance in the exported `.fit` come from your
+  power, rider + bike weight (Settings) and the gradient under the wheels, with
+  inertia, in every mode. ERG holds its power target and climbs are still ridden
+  at climbing speed, so segment times on the uploaded ride mean something. This
+  never changes what the trainer is sent: ERG sends only the target, and free
+  mode sends the slider or, with "Follow route", the route gradient. Set your
+  weight. It is what makes 200 W at 8% the right speed. With no route, speed
+  is whatever the trainer or speed sensor reports.
 - **The end of a workout is not the end of the ride** — when the last block
   runs out the workout hands over to free riding: the clock keeps going, the
   trainer switches from the ERG target to the gradient, a lap is closed at the
@@ -68,7 +78,16 @@ tablet on the same network you would need to serve the app over https.
   workout and ERG resumes.
 - **Controls** — start/pause, finish, lap, ERG bias ±, free-mode gradient,
   block skip and ±30 s seek, click-to-seek on the graph. Space (start/pause),
-  arrows (bias and seek), `L` (lap) and `M` (map) are bound. On a finished ride
+  arrows (bias and seek), `L` (lap), `M` (map) and `W` (workout panel) are
+  bound. The **◀ Panel** button in the top bar, next to Ride and Settings, or `W`, folds
+  the left Workout/Route panel away so the ride gets the full width. The choice
+  is remembered.
+- **The screen stays on** — while the app's tab is visible it holds a Screen
+  Wake Lock, so a long block where you never touch the computer does not end
+  with the display, or the PC, going to sleep. Switch tabs and the browser
+  releases it, and it is taken again when you come back. Closing the lid or an
+  OS power policy can still override it. Browsers without the API simply do
+  without. On a finished ride
   the start button reads **Start new ride** and asks before discarding a ride
   that has not been downloaded — once you have saved the `.fit`, it stops
   asking.
@@ -251,6 +270,19 @@ Two seams matter for the phases ahead:
   cleared. It also feeds a second of riding in one position per animation frame
   and asserts the map centre does not move once, while the marker does — the
   dead zone, measured.
+- **physics** and **virtual-speed** — the inertia model settles where the
+  steady-state power equation says, is slower up and faster down, coasts to a
+  stop and never goes negative. Then a session on a 10% climb with a trainer
+  insisting on a flat 35 km/h rides at climbing speed in ERG and on the free-mode
+  slider alike, and hands speed back to the trainer when the route is removed.
+  The exported ride is checked with `@garmin/fitsdk`: record speeds are the
+  virtual speed and distance is its integral.
+- **profile-graph** — the trace's trailing average (a one-second 500 W spike
+  draws at 300 W, heart-rate gaps are not averaged in as zero), while the
+  exported `.fit` keeps the raw 500 W.
+- **wake-lock** — the screen lock is taken on start, not stacked, not requested
+  while hidden, re-taken on return, and a refusal is only a warning.
+- **sidebar** — a sidebar folded away before a reload starts folded.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and seeking, loads the sample route and checks the climb

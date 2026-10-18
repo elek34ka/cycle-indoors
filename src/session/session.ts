@@ -4,6 +4,7 @@ import { settings } from '../core/settings';
 import { courseStore } from '../activity/course-store';
 import type { CoursePosition } from '../activity/course';
 import { hub, type DeviceHub } from '../devices/hub';
+import { DEFAULT_BIKE, stepSpeed } from '../devices/physics';
 import type { Telemetry } from '../devices/types';
 import { segmentAt, targetRatioAt, type Segment, type Workout } from '../workout/types';
 import type { Sample } from './metrics';
@@ -36,6 +37,9 @@ export interface SessionSnapshot {
   avgHeartRate?: number;
   lapAvgPower?: number;
   lapAvgHeartRate?: number;
+  /** km/h, like Telemetry.speed. On a loaded route this is the virtual speed
+   *  from power and the route's gradient, not what the trainer reports. */
+  speed?: number;
   distance: number;
   ergBias: number;
   /** the gradient the rider dialled in */
@@ -109,6 +113,8 @@ export class Session extends Emitter<SessionEvents> {
   private workout: Workout | undefined;
   private elapsed = 0;
   private distance = 0;
+  /** m/s along the loaded route; undefined until the next frame seeds it */
+  private virtualSpeed: number | undefined;
   private ergBias = 1;
   private grade = 0;
   private follow = false;
@@ -141,6 +147,8 @@ export class Session extends Emitter<SessionEvents> {
   constructor(private readonly devices: DeviceHub) {
     super();
     this.devices.on('telemetry', (t) => { this.live = t; });
+    // A new or removed route restarts the virtual speed from what the sensors say.
+    courseStore.on('course', () => { this.virtualSpeed = undefined; });
     this.loop();
   }
 
@@ -177,6 +185,7 @@ export class Session extends Emitter<SessionEvents> {
       avgHeartRate: this.sessionTotals.hrCount ? this.sessionTotals.hr / this.sessionTotals.hrCount : undefined,
       lapAvgPower: this.lapTotals.powerCount ? this.lapTotals.power / this.lapTotals.powerCount : undefined,
       lapAvgHeartRate: this.lapTotals.hrCount ? this.lapTotals.hr / this.lapTotals.hrCount : undefined,
+      speed: this.currentSpeed(),
       distance: this.distance,
       ergBias: this.ergBias,
       grade: this.grade,
@@ -202,6 +211,34 @@ export class Session extends Emitter<SessionEvents> {
     if (ratio === undefined) return 0;
     const ftp = this.workout.ftpOverride ?? settings.current.ftp;
     return Math.round(ratio * ftp * this.ergBias);
+  }
+
+  /** km/h: the virtual speed on a route, the sensors' speed otherwise. */
+  private currentSpeed(): number | undefined {
+    if (courseStore.current && this.virtualSpeed !== undefined) return this.virtualSpeed * 3.6;
+    return this.live.speed;
+  }
+
+  /**
+   * Speed over the next dt seconds, in km/h. On a route it comes from power and
+   * the gradient under the wheels, in every mode, so climbs are ridden at
+   * climbing speed even when ERG holds the brake at a flat-road target. Nothing
+   * here is sent to the trainer.
+   */
+  private advanceSpeed(dt: number): number {
+    const course = courseStore.current;
+    if (!course) {
+      this.virtualSpeed = undefined;
+      return this.live.speed ?? 0;
+    }
+    const { riderWeight, bikeWeight } = settings.current;
+    this.virtualSpeed = stepSpeed(
+      this.virtualSpeed ?? (this.live.speed ?? 0) / 3.6,
+      this.live.power ?? 0,
+      dt,
+      { ...DEFAULT_BIKE, mass: riderWeight + bikeWeight, grade: course.at(this.distance).gradient },
+    );
+    return this.virtualSpeed * 3.6;
   }
 
   private smoothed(buffer: { t: number; value: number }[], latest: number | undefined): number | undefined {
@@ -271,6 +308,7 @@ export class Session extends Emitter<SessionEvents> {
   private resetRide(): void {
     this.elapsed = 0;
     this.distance = 0;
+    this.virtualSpeed = undefined;
     this.samples = [];
     this.laps = [];
     this.lapStart = 0;
@@ -394,8 +432,7 @@ export class Session extends Emitter<SessionEvents> {
 
     if (this.state === 'running' && dt > 0) {
       this.elapsed += dt;
-      const speed = this.live.speed ?? 0;
-      this.distance += (speed / 3.6) * dt;
+      this.distance += (this.advanceSpeed(dt) / 3.6) * dt;
 
       this.detectWorkoutEnd();
       this.detectSegmentChange();
@@ -487,7 +524,7 @@ export class Session extends Emitter<SessionEvents> {
         targetPower: this.targetPower(),
         heartRate,
         cadence: this.live.cadence,
-        speed: this.live.speed,
+        speed: this.currentSpeed(),
         distance: this.distance,
         lat: position?.lat,
         lon: position?.lon,

@@ -11,7 +11,7 @@ for the things the code and the README do not say.
 
 ```sh
 npm run dev      # http://127.0.0.1:5173 — run it in your own terminal, Ctrl+C stops it
-npm test         # ~580 checks, no browser needed; must be green before any deploy
+npm test         # ~650 checks, no browser needed; must be green before any deploy
 npm run build    # tsc --noEmit + vite build into dist/
 ```
 
@@ -60,6 +60,10 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   (what sensors report, what the dashboard shows); `TrackPoint.speed` is m/s
   (what GPX and FIT store). Both are documented at their definitions. Check
   before converting.
+- **On a route, speed is not the sensors' speed.** `SessionSnapshot.speed` and
+  `Sample.speed` are the virtual speed from power + route gradient
+  (`stepSpeed` in `physics.ts`). `live.speed` is still the raw sensor value.
+  Read `snapshot.speed` for anything the rider sees or the FIT records.
 - **FTMS Indoor Bike Data bit 0 is inverted** — "More Data": instantaneous
   speed is present when the bit is *clear*. A test packet got this wrong before
   the parser did.

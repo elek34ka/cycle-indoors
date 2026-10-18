@@ -1,6 +1,9 @@
 import { setupDom } from './dom-setup';
 const dom = setupDom();
 
+// Settings saved by a version that predates the sidebar toggle.
+dom.window.localStorage.setItem('cycle-indoors.settings.v1', JSON.stringify({ ftp: 220, hrMax: 185 }));
+
 const consoleErrors: string[] = [];
 const realError = console.error;
 console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).join(' ')); };
@@ -69,6 +72,42 @@ suite('boot', () => {
     `${doc.querySelectorAll('#library-select option').length} options for ${LIBRARY.length} workouts`);
   check('the simulator is off by default', simulatorDefault === false);
   check('the workout graph has a canvas', doc.querySelector('#profile') !== null);
+});
+
+suite('the sidebar can be folded away', () => {
+  const view = doc.querySelector('#view-ride')!;
+  const button = doc.querySelector<HTMLButtonElement>('.topbar #toggle-sidebar')!;
+  const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = dom.window) =>
+    target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true, ...init }));
+
+  check('older saved settings get the sidebar shown', settings.current.showSidebar === true);
+  check('it starts visible', !view.classList.contains('sidebar-hidden'));
+  check('the toggle sits in the top bar next to the tabs', button?.previousElementSibling?.id === 'tabs');
+  check('it is no longer in the controls bar', doc.querySelector('#controls .sidebar-toggle') === null);
+  check('the toggle says it is pressed', button.getAttribute('aria-pressed') === 'true');
+
+  button.click();
+  check('the button hides it', view.classList.contains('sidebar-hidden'));
+  check('and remembers that', settings.current.showSidebar === false);
+  check('the button reflects it', button.getAttribute('aria-pressed') === 'false' && /Show/.test(button.title),
+    button.title);
+
+  press('w');
+  check('W brings it back', !view.classList.contains('sidebar-hidden') && settings.current.showSidebar);
+  press('W');
+  check('W hides it again', view.classList.contains('sidebar-hidden'));
+  press('w', { ctrlKey: true });
+  press('w', { metaKey: true });
+  check('Ctrl/Cmd+W are left to the browser', view.classList.contains('sidebar-hidden'));
+  press('w', {}, doc.querySelector('#library-select')!);
+  check('typing in a field does not toggle it', view.classList.contains('sidebar-hidden'));
+  press('w');
+  check('and it can be shown again', !view.classList.contains('sidebar-hidden'));
+
+  doc.querySelector<HTMLButtonElement>('#tabs [data-tab="settings"]')!.click();
+  check('the toggle is not offered on the Settings tab', button.classList.contains('hidden'));
+  doc.querySelector<HTMLButtonElement>('#tabs [data-tab="ride"]')!.click();
+  check('and comes back on the Ride tab', !button.classList.contains('hidden'));
 });
 
 await wait(1800);
@@ -195,6 +234,10 @@ suite('a loaded route drives the ride', () => {
   near('the course gradient reached the trainer', followedGrade, courseSnap.coursePosition!.gradient, 0.5);
   check('ascent is being tracked in real time', (courseSnap.coursePosition!.totalAscent ?? -1) >= 0,
     String(courseSnap.coursePosition!.totalAscent));
+  // On a route the tile shows the virtual speed, which the session owns.
+  check('the speed tile shows the session speed, not the raw sensor speed',
+    Math.abs(Number(tile(4).value) - (session.snapshot.speed ?? NaN)) < 0.6,
+    `${tile(4).value} vs ${session.snapshot.speed} (sensor ${session.snapshot.live.speed})`);
 });
 
 const workoutDuration = session.snapshot.workout!.duration;

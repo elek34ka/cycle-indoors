@@ -9,6 +9,7 @@ const { FtmsTrainer } = await import('../src/devices/ble/ftms');
 const { CHARACTERISTIC, SERVICE } = await import('../src/devices/ble/uuids');
 const { parseZwo } = await import('../src/workout/zwo');
 const { settings } = await import('../src/core/settings');
+const { courseStore } = await import('../src/activity/course-store');
 const { check, report, suite } = await import('./harness');
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -83,6 +84,24 @@ suite('a trainer that drops mid-ride comes back holding the right target', () =>
     sent.includes('05 b0 00'), sent.join(' | '));
 });
 
+// A 10% climb: virtual speed rides it, but the trainer must not hear about it.
+courseStore.load({
+  name: 'Wall', source: 'gpx', distance: 5000, ascent: 500, descent: 0,
+  hasPower: false, hasHr: false, hasElevation: true,
+  points: Array.from({ length: 501 }, (_, i) => ({ lat: 50 + (i * 10) / 111320, lon: 19, ele: 100 + i, distance: i * 10 })),
+});
+const beforeRoute = control.writes.length;
+await wait(900);
+
+suite('a loaded route does not turn ERG into simulation', () => {
+  const sent = writes().slice(beforeRoute);
+  check('no simulation parameters were sent in ERG', !sent.some((w) => w.startsWith('11')), sent.join(' | '));
+  check('the session is still in ERG', session.snapshot.effectiveMode === 'erg');
+  // still at the route start, where elevation smoothing softens the 10%
+  check('and the route gradient is known to the session', (session.snapshot.coursePosition?.gradient ?? 0) > 3,
+    String(session.snapshot.coursePosition?.gradient));
+});
+
 const beforeFree = control.writes.length;
 session.setErgBias(1);
 session.setMode('free');
@@ -97,7 +116,10 @@ suite('switching to free mode sends a gradient instead of a target', () => {
   check('the last one carries the 5% gradient', sims[sims.length - 1] === '11 00 00 f4 01 28 33',
     sims.join(' | '));
   check('there is no power target in free mode', session.snapshot.targetPower === 0);
+  check('the slider, not the 10% route, is what the trainer gets with Follow route off',
+    !sims.some((w) => w !== '11 00 00 f4 01 28 33' && w !== '11 00 00 00 00 28 33'), sims.join(' | '));
 });
+courseStore.unload();
 
 const beforeFinish = control.writes.length;
 session.finish();

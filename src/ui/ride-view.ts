@@ -79,7 +79,7 @@ const TILES: TileSpec[] = [
     key: 'speed',
     label: () => 'Speed',
     unit: 'km/h',
-    value: (s) => dec(s.live.speed, 1),
+    value: (s) => dec(s.speed, 1),
     sub: (s) => `${(s.distance / 1000).toFixed(2)} km`,
   },
   {
@@ -120,6 +120,7 @@ export class RideView {
   private workoutMeta: HTMLElement;
   private segmentList: HTMLElement;
   private startBtn!: HTMLButtonElement;
+  private sidebarBtn!: HTMLButtonElement;
   private modeButtons = new Map<string, HTMLButtonElement>();
   private biasGroup!: HTMLElement;
   private gradeGroup!: HTMLElement;
@@ -147,6 +148,9 @@ export class RideView {
       this.miniMap.setHover(distance === undefined || !course ? undefined : course.at(distance));
     });
 
+    this.sidebarBtn = qs<HTMLButtonElement>('#toggle-sidebar');
+    this.sidebarBtn.addEventListener('click', () => this.setSidebarVisible(!settings.current.showSidebar));
+
     this.buildTiles();
     this.buildControls();
     this.buildWorkoutPanel();
@@ -160,6 +164,7 @@ export class RideView {
     courseStore.on('course', (c) => this.onCourseChanged(c));
 
     this.bindKeys();
+    this.applySidebar(settings.current.showSidebar);
     this.loadLibraryWorkout(LIBRARY[0].id);
     this.onCourseChanged(undefined);
   }
@@ -187,6 +192,7 @@ export class RideView {
 
   private buildControls(): void {
     clear(this.controls);
+
 
     this.startBtn = el('button', {
       class: 'btn btn-primary', text: 'Start',
@@ -255,6 +261,19 @@ export class RideView {
     );
   }
 
+  /** Folds the workout/route panel away so the ride gets the whole width. */
+  setSidebarVisible(visible: boolean): void {
+    settings.patch({ showSidebar: visible });
+    this.applySidebar(visible);
+  }
+
+  private applySidebar(visible: boolean): void {
+    qs('#view-ride').classList.toggle('sidebar-hidden', !visible);
+    this.sidebarBtn.textContent = visible ? '◀ Panel' : '▶ Panel';
+    this.sidebarBtn.title = `${visible ? 'Hide' : 'Show'} the workout and route panel (W)`;
+    this.sidebarBtn.setAttribute('aria-pressed', String(visible));
+  }
+
   private attachLoader(buttonId: string, dropId: string, accept: string, handler: (file: File) => void): void {
     const input = el('input', { type: 'file' }) as HTMLInputElement;
     input.accept = accept;
@@ -308,6 +327,9 @@ export class RideView {
         case 'ArrowRight': e.preventDefault(); session.seek(e.shiftKey ? 60 : 10); break;
         case 'ArrowLeft': e.preventDefault(); session.seek(e.shiftKey ? -60 : -10); break;
         case 'l': case 'L': session.markLap(); break;
+        case 'w': case 'W':
+          if (!e.metaKey && !e.ctrlKey && !e.altKey) this.setSidebarVisible(!settings.current.showSidebar);
+          break;
         case 'm': case 'M':
           if (this.miniMap.available) this.miniMap.setVisible(!settings.current.showMiniMap);
           else toast('Load a .gpx or .fit route to get a map.');

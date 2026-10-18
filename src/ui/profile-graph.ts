@@ -3,8 +3,9 @@ import { zoneForRatio } from '../core/zones';
 import { settings } from '../core/settings';
 import { peakRatio, type Segment, type Workout } from '../workout/types';
 import type { SessionSnapshot } from '../session/session';
+import type { Sample } from '../session/metrics';
 
-const PADDING = { top: 14, right: 56, bottom: 22, left: 46 };
+const PADDING = { top: 16, right: 66, bottom: 26, left: 54 };
 /** Free-ride window when no workout is loaded, in seconds. */
 const FREE_WINDOW = 600;
 /** Granularity by which the axis grows when riding past the workout's end. */
@@ -13,6 +14,30 @@ const OVERRUN_STEP = 300;
 interface Hover { x: number; y: number; }
 
 interface TracePoint { t: number; power: number; hr?: number; }
+
+/**
+ * Trailing average of power and heart rate over `window` seconds of ride time,
+ * the same smoothing the tiles show, so the trace does not jitter second to
+ * second. Missing or zero heart rate is left out rather than averaged in as 0.
+ * A window of 0 returns the samples as they are.
+ */
+export function smoothSamples(samples: readonly Sample[], window: number): TracePoint[] {
+  let start = 0;
+  let powerSum = 0;
+  let hrSum = 0;
+  let hrCount = 0;
+  return samples.map((s, i) => {
+    if (window <= 0) return { t: s.t, power: s.power, hr: s.heartRate || undefined };
+    powerSum += s.power;
+    if (s.heartRate) { hrSum += s.heartRate; hrCount++; }
+    while (samples[start].t <= s.t - window) {
+      powerSum -= samples[start].power;
+      if (samples[start].heartRate) { hrSum -= samples[start].heartRate!; hrCount--; }
+      start++;
+    }
+    return { t: s.t, power: powerSum / (i - start + 1), hr: hrCount ? hrSum / hrCount : undefined };
+  });
+}
 
 export class ProfileGraph {
   private ctx: CanvasRenderingContext2D;
@@ -23,7 +48,7 @@ export class ProfileGraph {
   private lastSnapshot: SessionSnapshot | undefined;
   /** Downsampling the ride costs more than drawing it, and the sample count only
    *  changes once a second — so the bucketed trace is cached between frames. */
-  private traceCache: { sampleCount: number; width: number; points: TracePoint[] } | undefined;
+  private traceCache: { sampleCount: number; width: number; window: number; points: TracePoint[] } | undefined;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -117,7 +142,7 @@ export class ProfileGraph {
     ctx.clearRect(0, 0, this.width, this.height);
 
     // --- grid -------------------------------------------------------------
-    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.textBaseline = 'middle';
     for (let ratio = 0.5; ratio < ceiling; ratio += 0.5) {
       const y = yOf(ratio);
@@ -143,7 +168,7 @@ export class ProfileGraph {
       ctx.moveTo(x + 0.5, p.y);
       ctx.lineTo(x + 0.5, p.y + p.h);
       ctx.stroke();
-      ctx.fillText(hhmmss(t), x, p.y + p.h + 11);
+      ctx.fillText(hhmmss(t), x, p.y + p.h + 14);
     }
 
     // --- workout blocks ---------------------------------------------------
@@ -169,8 +194,8 @@ export class ProfileGraph {
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(63,192,122,0.85)';
       ctx.textAlign = 'left';
-      ctx.font = '10px ui-monospace, Menlo, monospace';
-      ctx.fillText('workout done', x + 4, p.y + 8);
+      ctx.font = '12px ui-monospace, Menlo, monospace';
+      ctx.fillText('workout done', x + 4, p.y + 10);
     }
 
     // --- progress cursor --------------------------------------------------
@@ -270,9 +295,9 @@ export class ProfileGraph {
     if (w > 34) {
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.textAlign = 'center';
-      ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
       const label = `${Math.round(((a + b) / 2) * ftp)}`;
-      ctx.fillText(label, (x0 + x1) / 2, Math.min(yA, yB) + 9);
+      ctx.fillText(label, (x0 + x1) / 2, Math.min(yA, yB) + 11);
     }
   }
 
@@ -288,32 +313,35 @@ export class ProfileGraph {
     if (samples.length < 2) return;
 
     const width = Math.round(p.w);
-    let points = this.traceCache && this.traceCache.sampleCount === samples.length && this.traceCache.width === width
-      ? this.traceCache.points
+    const window = settings.current.smoothPowerSeconds;
+    const cache = this.traceCache;
+    let points = cache && cache.sampleCount === samples.length && cache.width === width && cache.window === window
+      ? cache.points
       : undefined;
 
     if (!points) {
+      const smoothed = smoothSamples(samples, window);
       // Downsample to roughly one point per pixel, keeping the peak in each bucket
-      // so spikes survive and long rides stay cheap to draw.
-      const bucket = Math.max(1, Math.floor(samples.length / Math.max(1, width)));
+      // so efforts survive and long rides stay cheap to draw.
+      const bucket = Math.max(1, Math.floor(smoothed.length / Math.max(1, width)));
       points = [];
-      for (let i = 0; i < samples.length; i += bucket) {
-        const end = Math.min(samples.length, i + bucket);
-        let peak = samples[i];
+      for (let i = 0; i < smoothed.length; i += bucket) {
+        const end = Math.min(smoothed.length, i + bucket);
+        let peak = smoothed[i].power;
         let hrSum = 0;
         let hrCount = 0;
         for (let j = i; j < end; j++) {
-          const s = samples[j];
-          if (s.power > peak.power) peak = s;
-          if (s.heartRate) { hrSum += s.heartRate; hrCount++; }
+          const s = smoothed[j];
+          if (s.power > peak) peak = s.power;
+          if (s.hr) { hrSum += s.hr; hrCount++; }
         }
         points.push({
-          t: samples[Math.floor((i + end - 1) / 2)].t,
-          power: peak.power,
+          t: smoothed[Math.floor((i + end - 1) / 2)].t,
+          power: peak,
           hr: hrCount ? hrSum / hrCount : undefined,
         });
       }
-      this.traceCache = { sampleCount: samples.length, width, points };
+      this.traceCache = { sampleCount: samples.length, width, window, points };
     }
 
     ctx.save();
@@ -375,9 +403,9 @@ export class ProfileGraph {
     if (seg) lines.push(seg.powerStart === undefined ? 'free ride' : `target ${Math.round((seg.powerStart ?? 0) * ftp)} W`);
     if (sample) lines.push(`actual ${sample.power} W${sample.heartRate ? ` · ${sample.heartRate} bpm` : ''}`);
 
-    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace';
     const width = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
-    const height = lines.length * 14 + 10;
+    const height = lines.length * 17 + 10;
     const bx = Math.min(p.x + p.w - width, Math.max(p.x, x + 10));
     const by = Math.max(p.y, Math.min(p.y + p.h - height, yOf(1) - height / 2));
 
@@ -389,6 +417,6 @@ export class ProfileGraph {
     ctx.stroke();
     ctx.fillStyle = 'rgba(236,241,247,0.95)';
     ctx.textAlign = 'left';
-    lines.forEach((line, i) => ctx.fillText(line, bx + 8, by + 13 + i * 14));
+    lines.forEach((line, i) => ctx.fillText(line, bx + 8, by + 15 + i * 17));
   }
 }

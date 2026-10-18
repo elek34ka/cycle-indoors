@@ -1,7 +1,7 @@
 import { gradientColor, type Course } from '../activity/course';
 import type { SessionSnapshot } from '../session/session';
 
-const PADDING = { top: 20, right: 14, bottom: 17, left: 44 };
+const PADDING = { top: 24, right: 14, bottom: 21, left: 52 };
 
 export interface Plot { x: number; y: number; w: number; h: number; }
 
@@ -100,7 +100,7 @@ export class ElevationGraph {
 
     if (!this.course || !this.course.hasElevation) {
       ctx.fillStyle = 'rgba(147,161,180,0.55)';
-      ctx.font = '12px -apple-system, system-ui, sans-serif';
+      ctx.font = '14px -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(
@@ -150,7 +150,7 @@ export class ElevationGraph {
     ctx.stroke();
 
     // axes
-    ctx.font = '10px ui-monospace, Menlo, monospace';
+    ctx.font = '12px ui-monospace, Menlo, monospace';
     ctx.fillStyle = 'rgba(147,161,180,0.7)';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -169,10 +169,10 @@ export class ElevationGraph {
       ctx.lineTo(x, base);
       ctx.stroke();
       ctx.fillStyle = 'rgba(147,161,180,0.55)';
-      ctx.fillText(`${(d / 1000).toFixed(d % 1000 === 0 ? 0 : 1)}`, x, base + 13);
+      ctx.fillText(`${(d / 1000).toFixed(d % 1000 === 0 ? 0 : 1)}`, x, base + 16);
     }
     ctx.fillStyle = 'rgba(147,161,180,0.55)';
-    ctx.fillText('km', p.x + p.w, base + 13);
+    ctx.fillText('km', p.x + p.w, base + 16);
 
     const position = this.lastSnapshot?.coursePosition;
     if (position) this.drawRider(position.distance, position.ele, position.gradient, position.totalAscent, xOf, yOf, p);
@@ -203,20 +203,20 @@ export class ElevationGraph {
     ctx.fill();
 
     // Elevation and gradient, side by side, with the gradient in its own colour.
-    ctx.font = '11px ui-monospace, Menlo, monospace';
+    ctx.font = '13px ui-monospace, Menlo, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const eleText = `${Math.round(ele)} m`;
     const gradeText = `${gradient >= 0 ? '+' : ''}${gradient.toFixed(1)}%`;
     const ascentText = `↑ ${Math.round(totalAscent)} m`;
     ctx.fillStyle = 'rgba(231,236,243,0.95)';
-    ctx.fillText(eleText, p.x + 2, 10);
+    ctx.fillText(eleText, p.x + 2, 12);
     const w1 = ctx.measureText(eleText).width;
     ctx.fillStyle = gradientColor(gradient);
-    ctx.fillText(gradeText, p.x + 10 + w1, 10);
+    ctx.fillText(gradeText, p.x + 10 + w1, 12);
     const w2 = ctx.measureText(gradeText).width;
     ctx.fillStyle = 'rgba(147,161,180,0.9)';
-    ctx.fillText(ascentText, p.x + 18 + w1 + w2, 10);
+    ctx.fillText(ascentText, p.x + 18 + w1 + w2, 12);
   }
 
   private drawHover(distance: number, xOf: (d: number) => number, yOf: (e: number) => number, p: Plot): void {
@@ -244,20 +244,20 @@ export class ElevationGraph {
     ctx.stroke();
 
     const text = `${(distance / 1000).toFixed(2)} km · ${Math.round(point.ele)} m · ${point.gradient >= 0 ? '+' : ''}${point.gradient.toFixed(1)}%`;
-    ctx.font = '11px ui-monospace, Menlo, monospace';
+    ctx.font = '13px ui-monospace, Menlo, monospace';
     const tw = ctx.measureText(text).width + 14;
     const bx = Math.min(p.x + p.w - tw, Math.max(p.x, x + 8));
     ctx.fillStyle = 'rgba(12,16,22,0.94)';
     ctx.strokeStyle = 'rgba(255,255,255,0.14)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(bx, p.y + 2, tw, 20, 5);
+    ctx.roundRect(bx, p.y + 2, tw, 22, 5);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = 'rgba(236,241,247,0.95)';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, bx + 7, p.y + 12);
+    ctx.fillText(text, bx + 7, p.y + 13);
   }
 }
 
