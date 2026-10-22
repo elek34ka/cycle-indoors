@@ -44,4 +44,20 @@ suite('past the limit the oldest are dropped', () => {
 log.clear();
 check('clearing empties it', log.entries().length === 0);
 
+const switched = new BleLog();
+switched.record({ device: 'Trainer', kind: 'notify', bytes: Uint8Array.of(1) });
+switched.enabled = false;
+const afterOff = switched.entries().length;
+switched.record({ device: 'Trainer', kind: 'notify', bytes: Uint8Array.of(2) });
+const whileOff = switched.entries().length;
+switched.enabled = true;
+switched.record({ device: 'Trainer', kind: 'notify', bytes: Uint8Array.of(3) });
+
+suite('a switched-off log records nothing and gives its memory back', () => {
+  check('switching off empties it', afterOff === 0, String(afterOff));
+  check('nothing is recorded while off', whileOff === 0, String(whileOff));
+  check('switched on again, it records', switched.entries().map((e) => e.hex).join() === '03',
+    switched.entries().map((e) => e.hex).join());
+});
+
 report();

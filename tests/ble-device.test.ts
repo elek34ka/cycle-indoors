@@ -7,6 +7,10 @@ const { FtmsTrainer } = await import('../src/devices/ble/ftms');
 const { BleHeartRateMonitor, BlePowerMeter } = await import('../src/devices/ble/sensors');
 const { CHARACTERISTIC, SERVICE } = await import('../src/devices/ble/uuids');
 const { bleLog } = await import('../src/devices/ble/log');
+const { settings } = await import('../src/core/settings');
+// The Bluetooth log only records in debug mode.
+const debugDefault = settings.current.debugMode;
+settings.patch({ debugMode: true });
 const { check, near, report, suite } = await import('./harness');
 import type { Device, Telemetry } from '../src/devices/types';
 
@@ -436,4 +440,5 @@ suite('power meter with crank cadence', () => {
   check('and that it has no wheel sensor', !meter.reportsWheel);
 });
 
+settings.patch({ debugMode: debugDefault });
 report();

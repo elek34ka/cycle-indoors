@@ -215,9 +215,11 @@ The one real trainer it has met is a Van Rysel D500, which reported success
 but held ERG at about 0.42× the target afterwards, until power-cycled.
 
 **Bluetooth log.** With **Debug tools** switched on in Settings, Settings →
-Devices shows a **Download Bluetooth log** button. Recording runs whether or
-not debug mode is on, so a problem that has already happened can still be
-downloaded after switching it on. The app keeps, in memory, every control-point write, every control-point
+Devices shows a **Download Bluetooth log** button. Only then is anything
+recorded: bike data alone arrives several times a second, so with debug mode
+off nothing is logged or decoded. Switching it off also empties the log. To
+capture a problem, turn debug mode on first, then reproduce it. While it is
+on, the app keeps, in memory, every control-point write, every control-point
 response, every machine status and every Indoor Bike Data packet (and the other
 sensors' notifications). Each entry is timestamped, tagged with the device,
 and carries the raw bytes plus a short decoding. The buffer holds the last
@@ -353,12 +355,13 @@ Two seams matter for the phases ahead:
   preceded by Request Control and Start. Pause and resume send only targets.
 - **calibration-panel** — the devices panel in jsdom: no Calibrate for the
   simulator or for a trainer without bit 15, disabled during a ride, and the
-  guided steps, result and Dismiss. Download Bluetooth log is hidden until
-  debug mode is on, and then hands the browser a `.txt` file holding exactly
-  the logged lines.
+  guided steps, result and Dismiss. In debug mode, Download Bluetooth log hands
+  the browser a `.txt` file holding exactly the logged lines, including the run's
+  control traffic. Switching debug mode off hides it and empties the log.
 - **ble-log** — the Bluetooth log on its own: order kept, bytes as hex from
   either a `Uint8Array` or a `DataView`, characteristics named, the oldest
-  dropped past the limit, and an empty log that says so.
+  dropped past the limit, and an empty log that says so. A switched-off log
+  records nothing and gives its memory back.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and seeking, loads the sample route and checks the climb

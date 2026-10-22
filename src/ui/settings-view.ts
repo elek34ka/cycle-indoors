@@ -27,7 +27,7 @@ const TOGGLES: ToggleSpec[] = [
   {
     key: 'debugMode',
     label: 'Debug tools',
-    hint: 'Shows the Bluetooth log download under Devices, for diagnosing a misbehaving trainer.',
+    hint: 'Records Bluetooth traffic and offers it as a download under Devices, for diagnosing a misbehaving trainer. Off, nothing is recorded.',
   },
 ];
 

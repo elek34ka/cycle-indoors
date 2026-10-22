@@ -56,7 +56,9 @@ const calibrationOf = (label: string) => {
 };
 
 const simulatorDefault = settings.current.useMockDevices;
-settings.patch({ useMockDevices: true });
+const debugDefault = settings.current.debugMode;
+// Debug mode on from the start, so this run's traffic is in the Bluetooth log.
+settings.patch({ useMockDevices: true, debugMode: true });
 bootApp();
 for (let i = 0; i < 50 && mock.trainer.status !== 'connected'; i++) await wait(100);
 
@@ -145,13 +147,8 @@ dom.window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement
 const logButton = [...doc.querySelectorAll<HTMLButtonElement>('#devices-panel button')]
   .find((b) => b.textContent === 'Download Bluetooth log');
 const logSection = logButton?.closest<HTMLElement>('.device-diagnostics');
-const debugDefault = settings.current.debugMode;
-settings.patch({ debugMode: false });
-const hiddenWithoutDebug = logSection?.hidden === true;
-settings.patch({ debugMode: true });
 const shownInDebug = logSection?.hidden === false;
 logButton?.click();
-settings.patch({ debugMode: debugDefault });
 const downloadedText = downloaded
   ? await new Promise<string>((resolve) => {
     const reader = new dom.window.FileReader();
@@ -161,18 +158,23 @@ const downloadedText = downloaded
   : '';
 dom.window.URL.createObjectURL = realCreate;
 dom.window.HTMLAnchorElement.prototype.click = anchorClick;
+const textInDebug = bleLog.toText();
+settings.patch({ debugMode: false });
+const hiddenWithoutDebug = logSection?.hidden === true;
+const emptiedWithoutDebug = bleLog.entries().length === 0;
 
 suite('the Bluetooth log can be downloaded from the devices panel, in debug mode', () => {
   check('the button is there', logButton !== undefined);
-  check('hidden unless debug mode is on', hiddenWithoutDebug);
   check('shown in debug mode', shownInDebug);
+  check('hidden once debug mode is off', hiddenWithoutDebug);
+  check('and switching it off empties the log', emptiedWithoutDebug);
   check('a .txt file is offered', /^cycle-indoors-ble-.*\.txt$/.test(downloadName), downloadName);
-  check('it holds exactly the logged lines', downloadedText === bleLog.toText(), downloadedText.slice(0, 120));
+  check('it holds exactly the logged lines', downloadedText === textInDebug, downloadedText.slice(0, 120));
   check('including this run\'s control traffic', /fitnessMachineControlPoint/.test(downloadedText),
     downloadedText.slice(0, 120));
 });
 
 report();
-settings.patch({ useMockDevices: simulatorDefault });
+settings.patch({ useMockDevices: simulatorDefault, debugMode: debugDefault });
 session.dispose();
 dom.window.close();

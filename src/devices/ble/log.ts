@@ -1,3 +1,4 @@
+import { settings } from '../../core/settings';
 import { CHARACTERISTIC } from './uuids';
 
 export type BleLogKind = 'write' | 'response' | 'notify';
@@ -35,8 +36,19 @@ function bytesOf(data: Uint8Array | DataView): Uint8Array {
  */
 export class BleLog {
   private items: BleLogEntry[] = [];
+  private on = true;
 
   constructor(private readonly limit = DEFAULT_LIMIT) {}
+
+  /** Whether anything is being recorded. Callers check it before doing any
+   *  work for an entry, such as decoding a packet for its note. */
+  get enabled(): boolean { return this.on; }
+
+  /** Switching off also drops what was recorded, to give the memory back. */
+  set enabled(value: boolean) {
+    this.on = value;
+    if (!value) this.clear();
+  }
 
   record(entry: {
     device: string;
@@ -45,6 +57,7 @@ export class BleLog {
     bytes: Uint8Array | DataView;
     note?: string;
   }): void {
+    if (!this.on) return;
     this.items.push({
       at: new Date(),
       device: entry.device,
@@ -72,3 +85,6 @@ export class BleLog {
 }
 
 export const bleLog = new BleLog();
+// Only recorded in debug mode: bike data alone is several packets a second.
+bleLog.enabled = settings.current.debugMode;
+settings.on('change', (s) => { if (bleLog.enabled !== s.debugMode) bleLog.enabled = s.debugMode; });

@@ -154,14 +154,13 @@ export class DevicesView {
   }
 
   /** The Bluetooth log, for diagnosing a trainer from what it actually said.
-   *  Only shown in debug mode; recording carries on regardless, so a log of the
-   *  problem is already there when debug mode is switched on afterwards. */
+   *  Shown, and recorded, only in debug mode. */
   private buildDiagnosticsSection(): HTMLElement {
     const section = el('div', { class: 'device-diagnostics' }, [
       el('p', {
         class: 'hint',
-        text: 'Every command sent to a trainer and everything it reports back is kept in memory '
-          + 'while this page is open. It stays on this computer unless you share the file.',
+        text: 'While debug tools are on, every command sent to a trainer and everything it reports '
+          + 'back is kept in memory. It stays on this computer unless you share the file.',
       }),
       el('div', { class: 'device-actions' }, [
         el('button', {

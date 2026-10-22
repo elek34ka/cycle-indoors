@@ -162,9 +162,11 @@ export abstract class BleDevice implements Device {
     found.addEventListener('characteristicvaluechanged', (event) => {
       const value = (event.target as BluetoothRemoteGATTCharacteristic).value;
       if (!value) return;
-      let note: string | undefined;
-      try { note = log.note?.(value); } catch { /* a bad packet is still worth logging */ }
-      bleLog.record({ device: this.label, kind: log.kind ?? 'notify', uuid: characteristic, bytes: value, note });
+      if (bleLog.enabled) {
+        let note: string | undefined;
+        try { note = log.note?.(value); } catch { /* a bad packet is still worth logging */ }
+        bleLog.record({ device: this.label, kind: log.kind ?? 'notify', uuid: characteristic, bytes: value, note });
+      }
       try { handler(value); } catch (err) { console.warn(`${this.label}: bad packet`, err); }
     }, { signal: this.link?.signal });
     await found.startNotifications();
