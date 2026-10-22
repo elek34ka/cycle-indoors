@@ -153,9 +153,7 @@ export class RideView {
     this.workoutMeta = qs('#workout-meta');
     this.segmentList = qs('#segment-list');
 
-    this.graph = new ProfileGraph(qs<HTMLCanvasElement>('#profile'), (seconds) => {
-      if (session.snapshot.workout) session.seek(seconds - session.snapshot.elapsed);
-    });
+    this.graph = new ProfileGraph(qs<HTMLCanvasElement>('#profile'));
     this.miniMap = new MiniMap(qs('#mini-map-host'));
     this.elevation = new ElevationGraph(qs<HTMLCanvasElement>('#elevation'), (distance) => {
       const course = courseStore.current;
@@ -268,10 +266,8 @@ export class RideView {
       this.gradeGroup,
       el('div', { class: 'group' }, [
         el('label', { text: 'Jump' }),
-        el('button', { class: 'btn btn-small', text: '|◀', title: 'Previous block', on: { click: () => session.skipSegment(-1) } }),
-        el('button', { class: 'btn btn-small', text: '−30s', on: { click: () => session.seek(-30) } }),
         el('button', { class: 'btn btn-small', text: '+30s', on: { click: () => session.seek(30) } }),
-        el('button', { class: 'btn btn-small', text: '▶|', title: 'Next block', on: { click: () => session.skipSegment(1) } }),
+        el('button', { class: 'btn btn-small', text: '▶|', title: 'Next block', on: { click: () => session.skipToNextBlock() } }),
       ]),
       el('div', { class: 'spacer' }),
       this.legsGroup,
@@ -341,8 +337,6 @@ export class RideView {
         case ' ': e.preventDefault(); void this.pressStart(); break;
         case 'ArrowUp': e.preventDefault(); session.nudgeBias(0.01); break;
         case 'ArrowDown': e.preventDefault(); session.nudgeBias(-0.01); break;
-        case 'ArrowRight': e.preventDefault(); session.seek(e.shiftKey ? 60 : 10); break;
-        case 'ArrowLeft': e.preventDefault(); session.seek(e.shiftKey ? -60 : -10); break;
         case 'l': case 'L': session.markLap(); break;
         case 'w': case 'W':
           if (!e.metaKey && !e.ctrlKey && !e.altKey) this.setSidebarVisible(!settings.current.showSidebar);
@@ -490,10 +484,7 @@ export class RideView {
     workout.segments.forEach((seg) => {
       const mid = seg.powerStart === undefined ? undefined : ((seg.powerStart + (seg.powerEnd ?? seg.powerStart)) / 2);
       const color = mid === undefined ? '#7a8694' : zoneForPower(mid * ftp, ftp).color;
-      const node = el('li', {
-        dataset: { index: String(seg.index) },
-        on: { click: () => session.seek(seg.start - session.snapshot.elapsed) },
-      }, [
+      const node = el('li', { dataset: { index: String(seg.index) } }, [
         el('div', { class: 'bar' }),
         el('div', { class: 'label' }),
         el('div', { class: 'dur', text: mmss(seg.duration) }),

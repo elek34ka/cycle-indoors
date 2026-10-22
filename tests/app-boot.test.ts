@@ -220,12 +220,48 @@ suite('bias, modes and seeking', () => {
   check('ERG mode is restored', ergMode === 'erg', ergMode);
 
   const elapsedBefore = session.snapshot.elapsed;
-  session.skipSegment(1);
+  session.skipToNextBlock();
   check('skipping moves to the next block', session.snapshot.elapsed > elapsedBefore, String(session.snapshot.elapsed));
   check('the block index advanced', session.snapshot.segmentIndex === 1, String(session.snapshot.segmentIndex));
 
-  session.seek(-1000);
-  check('seeking cannot go below zero', session.snapshot.elapsed === 0, String(session.snapshot.elapsed));
+  const afterSkip = session.snapshot.elapsed;
+  session.seek(-30);
+  check('seeking back is refused', session.snapshot.elapsed === afterSkip, String(session.snapshot.elapsed));
+  session.seek(30);
+  check('+30 s moves the clock on by 30 s', session.snapshot.elapsed === afterSkip + 30, String(session.snapshot.elapsed));
+});
+
+suite('only next block and +30s move the workout clock', () => {
+  const jump = Array.from(doc.querySelectorAll('#controls .group'))
+    .find((g) => g.querySelector('label')?.textContent === 'Jump');
+  const labels = Array.from(jump?.querySelectorAll('button') ?? []).map((b) => b.textContent);
+  check('the Jump group holds exactly +30s and next block', labels.join(' ') === '+30s ▶|', labels.join(' '));
+
+  // The ride is running, so the clock creeps on by itself; a seek would move it
+  // by 10 s or more.
+  const unmoved = (before: number) => Math.abs(session.snapshot.elapsed - before) < 1;
+  const press = (key: string, shiftKey = false) =>
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, shiftKey, bubbles: true }));
+
+  let before = session.snapshot.elapsed;
+  press('ArrowRight'); press('ArrowRight', true); press('ArrowLeft'); press('ArrowLeft', true);
+  check('arrow keys do not seek', unmoved(before), `${before} → ${session.snapshot.elapsed}`);
+  const bias = session.snapshot.ergBias;
+  press('ArrowUp');
+  check('arrow up still nudges the bias', session.snapshot.ergBias > bias, `${bias} → ${session.snapshot.ergBias}`);
+  press('ArrowDown');
+
+  const canvas = doc.querySelector<HTMLCanvasElement>('#profile')!;
+  before = session.snapshot.elapsed;
+  for (const x of [5, 160, 315]) canvas.dispatchEvent(new dom.window.MouseEvent('click', { clientX: x, clientY: 100, bubbles: true }));
+  check('clicking the workout graph does not seek', unmoved(before), `${before} → ${session.snapshot.elapsed}`);
+
+  const index = session.snapshot.segmentIndex;
+  const blocks = doc.querySelectorAll<HTMLElement>('#segment-list li');
+  blocks.item(blocks.length - 1).click();
+  blocks.item(0).click();
+  check('clicking a block in the list does not seek', session.snapshot.segmentIndex === index,
+    `${index} → ${session.snapshot.segmentIndex}`);
 });
 
 const track = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'sample');
@@ -274,7 +310,7 @@ suite('a loaded route drives the ride', () => {
 
 const workoutDuration = session.snapshot.workout!.duration;
 const lapsBeforeEnd = session.snapshot.laps.length;
-session.seek(workoutDuration - 1.5);
+session.seek(workoutDuration - 1.5 - session.snapshot.elapsed);
 await wait(2600);
 const overrun = session.snapshot;
 const overrunRigMode = mock.rig.mode;

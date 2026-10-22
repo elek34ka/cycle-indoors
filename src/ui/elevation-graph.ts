@@ -1,7 +1,8 @@
 import { gradientColor, type Course } from '../activity/course';
 import type { SessionSnapshot } from '../session/session';
 
-const PADDING = { top: 24, right: 14, bottom: 21, left: 52 };
+/** The top margin holds the 24 px elevation readout, drawn centred on y 18. */
+const PADDING = { top: 36, right: 14, bottom: 21, left: 52 };
 
 export interface Plot { x: number; y: number; w: number; h: number; }
 
@@ -203,20 +204,22 @@ export class ElevationGraph {
     ctx.fill();
 
     // Elevation and gradient, side by side, with the gradient in its own colour.
-    ctx.font = '13px ui-monospace, Menlo, monospace';
+    // Large and bold: this is the only place the gradient is written, and it is
+    // read from the saddle.
+    ctx.font = '600 24px ui-monospace, Menlo, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const eleText = `${Math.round(ele)} m`;
     const gradeText = `${gradient >= 0 ? '+' : ''}${gradient.toFixed(1)}%`;
     const ascentText = `↑ ${Math.round(totalAscent)} m`;
     ctx.fillStyle = 'rgba(231,236,243,0.95)';
-    ctx.fillText(eleText, p.x + 2, 12);
+    ctx.fillText(eleText, p.x + 2, 18);
     const w1 = ctx.measureText(eleText).width;
     ctx.fillStyle = gradientColor(gradient);
-    ctx.fillText(gradeText, p.x + 10 + w1, 12);
+    ctx.fillText(gradeText, p.x + 16 + w1, 18);
     const w2 = ctx.measureText(gradeText).width;
     ctx.fillStyle = 'rgba(147,161,180,0.9)';
-    ctx.fillText(ascentText, p.x + 18 + w1 + w2, 12);
+    ctx.fillText(ascentText, p.x + 30 + w1 + w2, 18);
   }
 
   private drawHover(distance: number, xOf: (d: number) => number, yOf: (e: number) => number, p: Plot): void {

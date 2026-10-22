@@ -2,11 +2,12 @@ import { setupDom } from './dom-setup';
 setupDom();
 
 const { Course, gradientColor } = await import('../src/activity/course');
-const { distanceForX, xForDistance } = await import('../src/ui/elevation-graph');
+const { distanceForX, xForDistance, ElevationGraph } = await import('../src/ui/elevation-graph');
 const { parseGpx } = await import('../src/activity/gpx');
 const { readFileSync } = await import('node:fs');
 const { check, near, report, suite } = await import('./harness');
 import type { ActivityTrack, TrackPoint } from '../src/activity/types';
+import type { SessionSnapshot } from '../src/session/session';
 
 /** 1 km flat at 100 m, 1 km climbing to 200 m (10%), 1 km back down to 100 m. */
 function syntheticTrack(): ActivityTrack {
@@ -80,6 +81,41 @@ suite('the elevation cursor maps to the right place on the course', () => {
     worst = Math.max(worst, Math.abs((back ?? -1) - d));
   }
   near('drawing and hit-testing agree exactly', worst, 0, 0.0001);
+});
+
+suite('the elevation readout is large and clear of the profile', () => {
+  const host = document.createElement('div');
+  const canvas = document.createElement('canvas');
+  host.append(canvas);
+  document.body.append(host);
+  const drawn: { text: string; font: string; y: number }[] = [];
+  const realGetContext = canvas.getContext.bind(canvas);
+  canvas.getContext = ((kind: string) => {
+    const ctx = realGetContext(kind as '2d') as unknown as Record<string, unknown>;
+    ctx.fillText = (text: string, _x: number, y: number) => { drawn.push({ text, font: String(ctx.font), y }); };
+    return ctx;
+  }) as typeof canvas.getContext;
+  const graph = new ElevationGraph(canvas, () => {});
+  graph.setCourse(course);
+  graph.render({ coursePosition: { distance: 1300, ele: 130, gradient: -1.4, totalAscent: 16 } } as unknown as SessionSnapshot);
+  canvas.dispatchEvent(new window.MouseEvent('pointermove', { clientX: 150, clientY: 60, bubbles: true }));
+  host.remove();
+
+  const fontOf = (text: string) => drawn.find((d) => d.text === text)?.font ?? 'not drawn';
+  const readout = ['130 m', '-1.4%', '↑ 16 m'];
+  for (const text of readout) check(`"${text}" is drawn at 24 px`, /\b24px\b/.test(fontOf(text)), fontOf(text));
+  check('and bold', readout.every((text) => /^600 /.test(fontOf(text))), fontOf('130 m'));
+
+  // the axis labels: the top elevation is drawn 4 px below the plot's top
+  const maxLabel = drawn.find((d) => d.text === String(Math.round(course.maxEle)));
+  check('the axis labels stay at 12 px', /\b12px\b/.test(maxLabel?.font ?? ''), maxLabel?.font ?? 'not drawn');
+  const hover = drawn.find((d) => d.text.includes(' km · '));
+  check('the hover readout stays at 13 px', /\b13px\b/.test(hover?.font ?? ''), hover?.font ?? 'not drawn');
+
+  const plotTop = (maxLabel?.y ?? 0) - 4;
+  // 24 px text drawn baseline-middle reaches 12 px below its y
+  const readoutBottom = Math.max(...readout.map((text) => (drawn.find((d) => d.text === text)?.y ?? Infinity) + 12));
+  check('the readout ends above the plotted profile', readoutBottom <= plotTop, `${readoutBottom} vs ${plotTop}`);
 });
 
 suite('the sample route becomes a rideable course', () => {

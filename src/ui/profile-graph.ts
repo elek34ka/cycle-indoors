@@ -46,6 +46,23 @@ export function labelFits(textWidth: number, blockWidth: number): boolean {
   return textWidth + 8 <= blockWidth;
 }
 
+/**
+ * Where to draw a block's label (its baseline-middle y), centred on a block
+ * whose top edge runs from (x0, yA) to (x1, yB). On a ramp the edge is lower
+ * (larger y) at one end of the label than the other; placing the label by the
+ * lower one keeps all of it on the block's colour. Undefined when the label
+ * would run past `bottom`, the foot of the graph.
+ */
+export function blockLabelY(
+  x0: number, x1: number, yA: number, yB: number, textWidth: number, bottom: number,
+): number | undefined {
+  const edgeAt = (x: number) => (x1 > x0 ? yA + ((yB - yA) * (x - x0)) / (x1 - x0) : yA);
+  const centre = (x0 + x1) / 2;
+  const y = Math.max(edgeAt(centre - textWidth / 2), edgeAt(centre + textWidth / 2)) + 11;
+  // 12 px text, baseline-middle: it reaches 7 px below y
+  return y + 7 <= bottom ? y : undefined;
+}
+
 /** The hover readout: time, the target at exactly that moment (and the range on
  *  a ramp), then what was actually ridden there. */
 export function hoverLines(
@@ -79,10 +96,7 @@ export class ProfileGraph {
    *  changes once a second — so the bucketed trace is cached between frames. */
   private traceCache: { sampleCount: number; width: number; window: number; points: TracePoint[] } | undefined;
 
-  constructor(
-    private canvas: HTMLCanvasElement,
-    private onSeek: (seconds: number) => void,
-  ) {
+  constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context unavailable');
     this.ctx = ctx;
@@ -98,12 +112,6 @@ export class ProfileGraph {
     canvas.addEventListener('pointerleave', () => {
       this.hover = undefined;
       if (this.lastSnapshot) this.render(this.lastSnapshot);
-    });
-    canvas.addEventListener('click', (e) => {
-      if (!this.workout) return;
-      const rect = canvas.getBoundingClientRect();
-      const seconds = this.timeAt(e.clientX - rect.left);
-      if (seconds !== undefined) this.onSeek(seconds);
     });
   }
 
@@ -323,10 +331,12 @@ export class ProfileGraph {
 
     const label = wattsText(seg, ftp);
     ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
-    if (label && labelFits(ctx.measureText(label).width, w)) {
+    const textWidth = label ? ctx.measureText(label).width : 0;
+    const y = label && labelFits(textWidth, w) ? blockLabelY(x0, x1, yA, yB, textWidth, p.y + p.h) : undefined;
+    if (label && y !== undefined) {
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.textAlign = 'center';
-      ctx.fillText(label, (x0 + x1) / 2, Math.min(yA, yB) + 11);
+      ctx.fillText(label, (x0 + x1) / 2, y);
     }
   }
 

@@ -451,26 +451,23 @@ export class Session extends Emitter<SessionEvents> {
     this.emit('tick', this.snapshot);
   }
 
+  /** Moves the workout clock forward by `seconds`, never past the workout's end.
+   *  The clock only ever moves forward on request: a backward seek, or any seek
+   *  once the workout has run out, leaves it where it is. */
   seek(seconds: number): void {
-    if (!this.workout) return;
-    // Once the workout is over the clock has run past its duration, so allow
-    // seeking anywhere up to now — that is how the rider gets back into it.
-    this.jumpTo(clamp(this.elapsed + seconds, 0, Math.max(this.workout.duration, this.elapsed)));
+    if (!this.workout || seconds <= 0 || this.elapsed >= this.workout.duration) return;
+    this.jumpTo(Math.min(this.elapsed + seconds, this.workout.duration));
   }
 
-  skipSegment(direction: 1 | -1): void {
-    if (!this.workout) return;
+  /** Moves to the start of the next block, or to the workout's end from the last. */
+  skipToNextBlock(): void {
+    // past the end segmentAt still answers with the last block, whose "next" is
+    // the end itself, which would be a step back
+    if (!this.workout || this.elapsed >= this.workout.duration) return;
     const current = segmentAt(this.workout, this.elapsed);
     if (!current) return;
-    if (direction === 1) {
-      const next = this.workout.segments[current.index + 1];
-      this.jumpTo(next ? next.start : this.workout.duration);
-    } else {
-      // first press rewinds to the start of this block, second goes further back
-      const atStart = this.elapsed - current.start < 2;
-      const target = atStart ? this.workout.segments[current.index - 1] ?? current : current;
-      this.jumpTo(target.start);
-    }
+    const next = this.workout.segments[current.index + 1];
+    this.jumpTo(next ? next.start : this.workout.duration);
   }
 
   private jumpTo(seconds: number): void {

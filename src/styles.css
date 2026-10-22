@@ -212,7 +212,7 @@ main { min-height: 0; position: relative; }
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   font-size: 14px;
-  cursor: pointer;
+  cursor: default;
 }
 .segment-list li:hover { background: #1c2430; }
 .segment-list li .bar { width: 4px; height: 20px; border-radius: 2px; }
@@ -235,7 +235,8 @@ main { min-height: 0; position: relative; }
 /* The elevation profile always sits directly under the power graph. */
 .graph-stack {
   display: grid;
-  grid-template-rows: minmax(120px, 1fr) 128px;
+  /* 140 px: the 36 px readout margin plus 21 px of axis leave the profile 83 px */
+  grid-template-rows: minmax(120px, 1fr) 140px;
   gap: 8px;
   min-height: 0;
 }

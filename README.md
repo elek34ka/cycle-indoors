@@ -65,8 +65,8 @@ tablet on the same network you would need to serve the app over https.
   smoothed over a 30 m window, then gradient and cumulative ascent precomputed.
   The elevation profile always sits directly under the power graph, tinted by
   road gradient, showing where you are, the gradient under your wheels and how
-  much you have climbed so far — live, and it keeps counting across laps of the
-  route. The route map is a small panel in the corner of the graph (hideable,
+  much you have climbed so far — live, in large bold type above the profile so
+  it reads from the saddle, and it keeps counting across laps of the route. The route map is a small panel in the corner of the graph (hideable,
   `M`) on OpenStreetMap streets by default, with a dark basemap available. Drag
   it by its title bar anywhere in the window. It stays on screen, the position
   is remembered across reloads, and double-clicking the title puts it back in
@@ -85,11 +85,13 @@ tablet on the same network you would need to serve the app over https.
   runs out the workout hands over to free riding: the clock keeps going, the
   trainer switches from the ERG target to the gradient, a lap is closed at the
   boundary and the graph's axis extends with a marker where the workout ended.
-  The ride finishes when you say so. Seeking backwards puts you back into the
-  workout and ERG resumes.
+  The ride finishes when you say so. There is no way back into a finished
+  workout.
 - **Controls** — start/pause, finish, lap, ERG bias ±, free-mode gradient,
-  block skip and ±30 s seek, click-to-seek on the graph. Space (start/pause),
-  arrows (bias and seek), `L` (lap), `M` (map) and `W` (workout panel) are
+  next block (`▶|`) and `+30s`. The workout clock only moves forward: there is
+  no previous block or −30 s, and clicking the graph or a block in the list
+  does not jump, so a stray tap mid-ride cannot send you back. Space
+  (start/pause), ↑/↓ (bias), `L` (lap), `M` (map) and `W` (workout panel) are
   bound. The **◀ Panel** button in the top bar, next to Ride and Settings, or `W`, folds
   the left Workout/Route panel away so the ride gets the full width. The choice
   is remembered.
@@ -294,7 +296,9 @@ Two seams matter for the phases ahead:
   Garmin extensions, and the shipped sample files.
 - **course** — gradient, cumulative ascent and lap wrapping against a synthetic
   route with known geometry, the gradient colour scale, and the elevation
-  graph's distance/pixel mapping in both directions. That mapping is one pair of
+  graph's distance/pixel mapping in both directions. The rendered elevation
+  readout is checked to be 24 px and bold, to end above the plotted profile,
+  and to leave the axis and hover text at their own sizes. That mapping is one pair of
   pure functions used by both the drawing code and the hover cursor, so the two
   cannot drift apart again.
 - **ble** — every characteristic parser against hand-built packets: the
@@ -349,7 +353,15 @@ Two seams matter for the phases ahead:
   virtual speed and distance is its integral.
 - **profile-graph** — the trace's trailing average (a one-second 500 W spike
   draws at 300 W, heart-rate gaps are not averaged in as zero), while the
-  exported `.fit` keeps the raw 500 W.
+  exported `.fit` keeps the raw 500 W. Block labels are placed by a pure
+  function below a ramp's top edge across the label's full width, and the
+  rendered graph is checked to draw a 100–120 W and a steep 120–360 W ramp label
+  on the block's colour rather than at the height of its high end, where it
+  used to be invisible.
+- **workout-navigation** — the workout clock only moves forward: `+30s` and
+  next block advance it, a backward seek is refused, `+30s` at 59:50 of an
+  hour stops on 60:00, and once the workout has run out neither control moves
+  the clock (next block from the last block would otherwise step back to the end).
 - **wake-lock** — the screen lock is taken on start, not stacked, not requested
   while hidden, re-taken on return, and a refusal is only a warning.
 - **sidebar** — a sidebar folded away before a reload starts folded.
@@ -374,7 +386,9 @@ Two seams matter for the phases ahead:
   records nothing and gives its memory back.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
-  bias, mode switching and seeking, loads the sample route and checks the climb
+  bias, mode switching and forward-only seeking (the Jump group holds only
+  `+30s` and `▶|`; arrow keys, graph clicks and block-list clicks do not move
+  the clock), loads the sample route and checks the climb
   tile, mini map and route-following gradient, rides to the end, and verifies
   the summary and its FIT export. It also fails if anything reaches
   `console.error`.
