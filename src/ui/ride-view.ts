@@ -9,7 +9,7 @@ import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
 import type { Workout } from '../workout/types';
-import { clear, el, qs, setClass, setText, toast } from './dom';
+import { clear, el, qs, setClass, setParts, setText, toast, type SubPart } from './dom';
 import { confirmDialog } from './confirm';
 import { ElevationGraph } from './elevation-graph';
 import { MiniMap } from './mini-map';
@@ -20,18 +20,24 @@ interface TileSpec {
   label: (s: SessionSnapshot) => string;
   unit?: string;
   value: (s: SessionSnapshot) => string;
-  sub?: (s: SessionSnapshot) => string;
+  sub?: (s: SessionSnapshot) => string | SubPart[];
   stripe?: (s: SessionSnapshot) => string | undefined;
   visible?: (s: SessionSnapshot) => boolean;
 }
 
-/** "avg 210 · lap 215" — the session and current-lap averages for a metric. */
-function averages(avg: number | undefined, lap: number | undefined): string {
-  const parts: string[] = [];
-  if (avg !== undefined) parts.push(`avg ${Math.round(avg)}`);
-  if (lap !== undefined) parts.push(`lap ${Math.round(lap)}`);
-  return parts.join(' · ');
+/** "avg 210 · lap 215" — the session and current-lap averages for a metric,
+ *  with the numbers as strong parts so they read at a glance from the saddle. */
+export function averages(avg: number | undefined, lap: number | undefined): SubPart[] {
+  const parts: SubPart[] = [];
+  for (const [name, value] of [['avg', avg], ['lap', lap]] as const) {
+    if (value === undefined) continue;
+    parts.push({ text: `${parts.length ? ' · ' : ''}${name} ` }, { text: String(Math.round(value)), strong: true });
+  }
+  return parts;
 }
+
+/** The parts, or the fallback text when there are none. */
+const orElse = (parts: SubPart[], fallback: string): SubPart[] | string => (parts.length ? parts : fallback);
 
 const TILES: TileSpec[] = [
   {
@@ -39,7 +45,7 @@ const TILES: TileSpec[] = [
     label: () => `Power ${settings.current.smoothPowerSeconds}s`,
     unit: 'W',
     value: (s) => int(s.smoothedPower),
-    sub: (s) => averages(s.avgPower, s.lapAvgPower) || `${settings.current.smoothPowerSeconds}s average`,
+    sub: (s) => orElse(averages(s.avgPower, s.lapAvgPower), `${settings.current.smoothPowerSeconds}s average`),
     stripe: (s) => (s.smoothedPower === undefined ? undefined : zoneForPower(s.smoothedPower, settings.current.ftp).color),
   },
   {
@@ -65,7 +71,7 @@ const TILES: TileSpec[] = [
     label: () => `Heart rate ${settings.current.smoothPowerSeconds}s`,
     unit: 'bpm',
     value: (s) => int(s.smoothedHeartRate),
-    sub: (s) => averages(s.avgHeartRate, s.lapAvgHeartRate) || 'no strap',
+    sub: (s) => orElse(averages(s.avgHeartRate, s.lapAvgHeartRate), 'no strap'),
     stripe: (s) => (s.smoothedHeartRate ? hrZoneColor(s.smoothedHeartRate, settings.current.hrMax) : undefined),
   },
   {
@@ -496,7 +502,10 @@ export class RideView {
       if (!visible) continue;
       setText(tile.label, spec.label(s));
       setText(tile.value, spec.value(s));
-      setText(tile.sub, spec.sub?.(s) ?? '');
+      const sub = spec.sub?.(s) ?? '';
+      if (typeof sub === 'string') setText(tile.sub, sub);
+      else setParts(tile.sub, sub);
+      setClass(tile.sub, 'has-parts', typeof sub !== 'string');
       const stripe = spec.stripe?.(s);
       tile.stripe.style.background = stripe ?? 'transparent';
       setClass(tile.root, 'accent', Boolean(stripe));

@@ -47,7 +47,8 @@ tablet on the same network you would need to serve the app over https.
   route's gradient — instead of a target.
 - **Live ride view** — tiles for power, target, heart rate, cadence, speed,
   metres climbed and time. Power and heart rate show a 3-second average (the
-  window is configurable) with the session and current-lap averages underneath.
+  window is configurable) with the session and current-lap averages underneath,
+  their numbers in bold so they can be read at a glance.
   A canvas workout profile coloured by power zone carries your actual power and
   heart rate over it, averaged over the same window as the tiles so the lines do
   not jitter (the exported file keeps every raw second); the current block is highlighted, with the next block and

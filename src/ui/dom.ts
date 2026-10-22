@@ -58,6 +58,22 @@ export function setText(node: Element, value: string): void {
   if (node.textContent !== value) node.textContent = value;
 }
 
+/** A run of text; `strong` runs are drawn as `<b>` so they can be styled apart. */
+export interface SubPart {
+  text: string;
+  strong?: boolean;
+}
+
+/** `setText` for mixed runs. Rebuilds only when the joined text changes — a
+ *  run's emphasis is fixed by its position, so equal text means equal structure. */
+export function setParts(node: Element, parts: SubPart[]): void {
+  if (node.textContent === parts.map((p) => p.text).join('')) return;
+  clear(node);
+  for (const part of parts) {
+    node.append(part.strong ? el('b', { text: part.text }) : document.createTextNode(part.text));
+  }
+}
+
 export function setClass(node: Element, name: string, on: boolean): void {
   node.classList.toggle(name, on);
 }

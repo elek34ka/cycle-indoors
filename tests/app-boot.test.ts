@@ -21,6 +21,8 @@ const { courseStore } = await import('../src/activity/course-store');
 const { parseGpx } = await import('../src/activity/gpx');
 const { parseZwo } = await import('../src/workout/zwo');
 const { hideSummary } = await import('../src/ui/summary');
+const { setParts } = await import('../src/ui/dom');
+const { averages } = await import('../src/ui/ride-view');
 const { readFileSync } = await import('node:fs');
 const { LIBRARY } = await import('../src/workout/library');
 
@@ -177,6 +179,35 @@ suite('three-second, session and lap averages', () => {
     /avg \d+ · lap \d+/.test(tile(0).sub), tile(0).sub);
   check('the heart-rate tile sub-line shows session and lap averages',
     /avg \d+ · lap \d+/.test(tile(2).sub), tile(2).sub);
+});
+
+suite('sub-lines with emphasised parts', () => {
+  const host = doc.createElement('div');
+  const parts = [{ text: 'avg ' }, { text: '210', strong: true }, { text: ' · lap ' }, { text: '215', strong: true }];
+  setParts(host, parts);
+  check('the joined text is written', host.textContent === 'avg 210 · lap 215', host.textContent ?? '');
+  check('each strong part becomes a <b>', host.querySelectorAll('b').length === 2);
+  const before = Array.from(host.childNodes);
+  setParts(host, parts.map((p) => ({ ...p })));
+  const after = Array.from(host.childNodes);
+  check('unchanged text leaves the nodes in place',
+    before.length === after.length && before.every((n, i) => n === after[i]));
+
+  const strong = (index: number) => Array.from(tile(index).root?.querySelectorAll('.tile-sub b') ?? [])
+    .map((b) => b.textContent ?? '');
+  check('the power averages are two emphasised numbers',
+    strong(0).length === 2 && strong(0).every((t) => /^\d+$/.test(t)), strong(0).join(','));
+  check('the heart-rate averages are two emphasised numbers',
+    strong(2).length === 2 && strong(2).every((t) => /^\d+$/.test(t)), strong(2).join(','));
+  const sessionOnly = averages(210, undefined);
+  check('a session average alone reads "avg 210"',
+    sessionOnly.map((p) => p.text).join('') === 'avg 210', sessionOnly.map((p) => p.text).join(''));
+  check('a session average alone has one strong part', sessionOnly.filter((p) => p.strong).length === 1);
+  for (const [index, name] of [[1, 'Target'], [3, 'Cadence'], [4, 'Speed'], [6, 'Elapsed']] as const) {
+    const sub = tile(index).root?.querySelector('.tile-sub');
+    check(`the ${name} sub-line is not emphasised`,
+      sub !== null && sub !== undefined && sub.querySelector('b') === null && !sub.classList.contains('has-parts'));
+  }
 });
 
 suite('bias, modes and seeking', () => {

@@ -271,6 +271,10 @@ main { min-height: 0; position: relative; }
 }
 .tile .tile-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; }
 .tile .tile-sub { font-size: 13px; color: var(--text-faint); font-family: var(--mono); }
+/* Session and lap averages: on --bg-raised the labels are 6.8:1 and the bold
+   numbers 15:1, so they read from the saddle without growing the text. */
+.tile .tile-sub.has-parts { color: var(--text-dim); }
+.tile .tile-sub b { color: var(--text); font-weight: 700; }
 .tile.accent { border-color: #2c4f74; }
 .tile .tile-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
 
