@@ -31,6 +31,8 @@ const MACHINE_STATUS: Record<number, string> = {
 };
 
 const CONTROL_LOST = 0xff;
+const RESET = 0x01;
+const STOPPED_BY_RIDER = 0x02;
 const SPIN_DOWN_STATUS = 0x14;
 
 /** The parameter of a spin-down status (0x14). */
@@ -79,8 +81,10 @@ export class FtmsTrainer extends BleDevice {
     cancel: async () => {
       const point = this.requireControl();
       await point.command(encodeSpinDown(false), CONTROL_OPCODE.spinDownControl);
+      point.invalidate();
     },
     onSignal: (handler) => this.spinDownBus.on('signal', handler),
+    end: () => this.controlPoint?.invalidate(),
   };
 
   private readonly api: TrainerControl = {
@@ -195,10 +199,16 @@ export class FtmsTrainer extends BleDevice {
       this.controlPoint?.invalidate();
       this.spinDownBus.emit('signal', 'controlLost');
     }
+    // A reset or stopped trainer ignores targets until it is started again.
+    if (opcode === RESET || opcode === STOPPED_BY_RIDER) this.controlPoint?.invalidate();
     if (opcode === SPIN_DOWN_STATUS && view.byteLength >= 2) {
       const signal = SPIN_DOWN_SIGNAL[view.getUint8(1)];
       if (signal) {
         this.lastMachineStatus = SPIN_DOWN_TEXT[signal];
+        // The trainer leaves the controlled, started state to run a spin-down
+        // and does not always say so with 0xFF, so a result means the next
+        // target needs the full handshake again.
+        if (signal === 'success' || signal === 'error') this.controlPoint?.invalidate();
         this.spinDownBus.emit('signal', signal);
       }
     }

@@ -196,7 +196,13 @@ export class FtmsControlPoint {
     return this.enqueue(async () => {
       await this.grantControl();
       const response = await this.transfer(bytes, opcode);
-      if (!response || response.ok) return response;
+      if (!response || response.ok) {
+        // A stopped or reset trainer ignores targets until it is started again,
+        // so the next command repeats the whole handshake. Pause does not.
+        if (opcode === CONTROL_OPCODE.reset
+          || (opcode === CONTROL_OPCODE.stopOrPause && bytes[1] === 0x01)) this.invalidate();
+        return response;
+      }
       if (response.result === RESULT.notPermitted) this.granted = false;
       throw new Error(`${opcodeName(opcode)} failed: ${response.text}`);
     });

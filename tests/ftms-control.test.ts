@@ -232,6 +232,34 @@ suite('losing control re-requests it rather than failing', () => {
   check('control is held again', revokingPoint.hasControl);
 });
 
+// --- stop and reset end the controlled period; pause does not ----------------
+const stopping = new FakeIo();
+stopping.reply = alwaysSucceed;
+const stoppingPoint = new FtmsControlPoint(stopping, 200);
+stopping.point = stoppingPoint;
+await stoppingPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
+await stoppingPoint.command(encodeStopOrPause(false), CONTROL_OPCODE.stopOrPause);
+const afterStop = stopping.writes.length;
+await stoppingPoint.command(encodeTargetPower(210), CONTROL_OPCODE.setTargetPower);
+const sentAfterStop = stopping.writes.slice(afterStop);
+await stoppingPoint.command(Uint8Array.of(CONTROL_OPCODE.reset), CONTROL_OPCODE.reset);
+const afterReset = stopping.writes.length;
+await stoppingPoint.command(encodeTargetPower(220), CONTROL_OPCODE.setTargetPower);
+const sentAfterReset = stopping.writes.slice(afterReset);
+await stoppingPoint.command(encodeStopOrPause(true), CONTROL_OPCODE.stopOrPause);
+const afterPause = stopping.writes.length;
+await stoppingPoint.command(encodeTargetPower(230), CONTROL_OPCODE.setTargetPower);
+const sentAfterPause = stopping.writes.slice(afterPause);
+
+suite('a stopped or reset trainer is put back under control', () => {
+  check('after Stop: request control, start, then the target',
+    sentAfterStop.join(' | ') === '00 | 07 | 05 d2 00', sentAfterStop.join(' | '));
+  check('after Reset: request control, start, then the target',
+    sentAfterReset.join(' | ') === '00 | 07 | 05 dc 00', sentAfterReset.join(' | '));
+  check('after Pause: the target goes straight out',
+    sentAfterPause.join(' | ') === '05 e6 00', sentAfterPause.join(' | '));
+});
+
 // --- a target the trainer rejects ------------------------------------------
 const picky = new FakeIo();
 picky.reply = (bytes) => response(

@@ -175,6 +175,25 @@ suite('finishing releases the brake', () => {
   check('a stop was sent', cpWrites()[beforeStop] === '08 01', cpWrites()[beforeStop]);
 });
 
+// A stopped or reset trainer ignores targets until it is started again.
+const machineStatus = bt.characteristic(SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineStatus)!;
+await trainer.control!.setTargetPower(200);
+machineStatus.notify(bytes2(0x02));
+const afterStopped = controlChar.writes.length;
+await trainer.control!.setTargetPower(210);
+const sentAfterStopped = cpWrites().slice(afterStopped);
+machineStatus.notify(bytes2(0x01));
+const afterReset = controlChar.writes.length;
+await trainer.control!.setTargetPower(220);
+const sentAfterReset = cpWrites().slice(afterReset);
+
+suite('a trainer that reports a stop or reset is put back under control', () => {
+  check('after "stopped by the rider": request control, start, then the target',
+    sentAfterStopped.join(' | ') === '00 | 07 | 05 d2 00', sentAfterStopped.join(' | '));
+  check('after "reset": request control, start, then the target',
+    sentAfterReset.join(' | ') === '00 | 07 | 05 dc 00', sentAfterReset.join(' | '));
+});
+
 suite('a trainer that does not advertise spin-down offers no calibration', () => {
   check('no spin-down without feature bit 15', trainer.control!.spinDown === undefined);
 });
@@ -246,6 +265,23 @@ suite('cancelling sends ignore', () => {
   const sent = spinControl.writes.map(hex).slice(beforeCancel);
   check('0x13 0x02 went out, after re-requesting control', sent.join(' | ') === '00 | 07 | 13 02',
     sent.join(' | '));
+});
+
+// A spin-down result means the trainer left its started state to run it.
+spinStatus.notify(bytes2(0x14, 0x02));
+const afterSpinSuccess = spinControl.writes.length;
+await spinTrainer.control!.setTargetPower(150);
+const sentAfterSpinSuccess = spinControl.writes.map(hex).slice(afterSpinSuccess);
+spinStatus.notify(bytes2(0x14, 0x03));
+const afterSpinError = spinControl.writes.length;
+await spinTrainer.control!.setTargetPower(160);
+const sentAfterSpinError = spinControl.writes.map(hex).slice(afterSpinError);
+
+suite('a spin-down result puts the trainer back under control for the next target', () => {
+  check('after success: request control, start, then the target',
+    sentAfterSpinSuccess.join(' | ') === '00 | 07 | 05 96 00', sentAfterSpinSuccess.join(' | '));
+  check('after error: request control, start, then the target',
+    sentAfterSpinError.join(' | ') === '00 | 07 | 05 a0 00', sentAfterSpinError.join(' | '));
 });
 
 signals.length = 0;

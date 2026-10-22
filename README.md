@@ -202,6 +202,13 @@ never offers it: there is nothing real to calibrate.
   and while a spin-down runs, Start is refused with a message, so no ERG or
   simulation target can land in the middle of it. The session owns all of
   this, as it owns every other trainer write.
+- A spin-down takes the trainer out of its controlled, started state, often
+  without a 0xFF to say so. However it ends, the next target therefore
+  re-requests control and sends Start/Resume (0x07) first. The same applies
+  after the app sends Stop or Reset, and after the trainer reports a reset
+  (0x01) or a stop (0x02). Without this, a ride after calibrating or after
+  Finish sent targets the trainer acknowledged but did not hold. Pause does
+  not repeat the handshake.
 
 Like the rest of the BLE code, this has been tested against a fake GATT stack
 only, not against a real trainer.
@@ -278,7 +285,8 @@ Two seams matter for the phases ahead:
   requested once rather than once per command, concurrent commands serialised
   **and ordered**, a silent trainer still ridable, a refusal surfaced, control
   re-acquired after it is revoked, and a failed GATT write not jamming the queue.
-  Also the spin-down packet, its target speed window, and a command resolving
+  After Stop or Reset the next target is preceded by Request Control and Start
+  again; after Pause it is not. Also the spin-down packet, its target speed window, and a command resolving
   with its own response even when queued behind another.
 - **erg-integration** — the whole chain in one test: a workout block's target
   becomes the right bytes on a fake trainer's control point, the bias control
@@ -291,7 +299,8 @@ Two seams matter for the phases ahead:
   lose control to the trainer and re-acquire it, disconnect deliberately. A
   trainer advertising spin-down offers it, and one that does not, does not.
   Spin-down status packets arrive as signals, once each, even after a
-  reconnect. This
+  reconnect. A machine status of reset or stopped, or a spin-down result, makes
+  the next target re-request control and Start. This
   is what caught
   the duplicate-listener bug: Chrome returns the *same* characteristic object
   after a reconnect, so every packet was being handled twice until listeners
@@ -323,7 +332,9 @@ Two seams matter for the phases ahead:
   Calibration is refused mid-ride. Start is refused mid-calibration, with zero
   target writes reaching the trainer. It covers success, cancel (which sends
   ignore), the 90 s timeout and a mid-spin-down disconnect, and checks that a
-  ride starts normally afterwards.
+  ride starts normally afterwards. After a successful, cancelled or timed-out
+  spin-down, and on a second ride after Finish, the first ERG target is
+  preceded by Request Control and Start. Pause and resume send only targets.
 - **calibration-panel** — the devices panel in jsdom: no Calibrate for the
   simulator or for a trainer without bit 15, disabled during a ride, and the
   guided steps, result and Dismiss.

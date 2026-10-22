@@ -293,6 +293,9 @@ export class Session extends Emitter<SessionEvents> {
     const timer = window.setTimeout(() => this.applySpinDown({ type: 'timeout' }), this.spinDownTimeoutMs);
     this.spinDownWatch = [
       () => clearTimeout(timer),
+      // However it ended — a timeout included — the next target needs the
+      // trainer put back under control first.
+      () => spinDown.end?.(),
       spinDown.onSignal((signal) => this.applySpinDown({ type: 'signal', signal })),
       trainer.onStatus((status) => {
         if (status !== 'connected') this.applySpinDown({ type: 'disconnected' });

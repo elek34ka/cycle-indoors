@@ -56,6 +56,9 @@ export interface TrainerSpinDown {
   /** Abandon a spin-down in progress */
   cancel(): Promise<void>;
   onSignal(handler: (signal: SpinDownSignal) => void): () => void;
+  /** The spin-down is over, however it ended. The trainer has left the state
+   *  it was in, so the next target must put it back under control. */
+  end?(): void;
 }
 
 export interface Device {
