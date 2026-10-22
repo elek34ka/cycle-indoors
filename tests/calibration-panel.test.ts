@@ -134,6 +134,44 @@ suite('a disconnected trainer offers no calibration', () => {
   check('hidden', !calibrationOf('Spin Trainer').shown);
 });
 
+// --- the Bluetooth log download -------------------------------------------------
+const { bleLog } = await import('../src/devices/ble/log');
+let downloaded: Blob | undefined;
+let downloadName = '';
+const realCreate = dom.window.URL.createObjectURL;
+dom.window.URL.createObjectURL = (blob: Blob) => { downloaded = blob; return 'blob:test'; };
+const anchorClick = dom.window.HTMLAnchorElement.prototype.click;
+dom.window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) { downloadName = this.download; };
+const logButton = [...doc.querySelectorAll<HTMLButtonElement>('#devices-panel button')]
+  .find((b) => b.textContent === 'Download Bluetooth log');
+const logSection = logButton?.closest<HTMLElement>('.device-diagnostics');
+const debugDefault = settings.current.debugMode;
+settings.patch({ debugMode: false });
+const hiddenWithoutDebug = logSection?.hidden === true;
+settings.patch({ debugMode: true });
+const shownInDebug = logSection?.hidden === false;
+logButton?.click();
+settings.patch({ debugMode: debugDefault });
+const downloadedText = downloaded
+  ? await new Promise<string>((resolve) => {
+    const reader = new dom.window.FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(downloaded!);
+  })
+  : '';
+dom.window.URL.createObjectURL = realCreate;
+dom.window.HTMLAnchorElement.prototype.click = anchorClick;
+
+suite('the Bluetooth log can be downloaded from the devices panel, in debug mode', () => {
+  check('the button is there', logButton !== undefined);
+  check('hidden unless debug mode is on', hiddenWithoutDebug);
+  check('shown in debug mode', shownInDebug);
+  check('a .txt file is offered', /^cycle-indoors-ble-.*\.txt$/.test(downloadName), downloadName);
+  check('it holds exactly the logged lines', downloadedText === bleLog.toText(), downloadedText.slice(0, 120));
+  check('including this run\'s control traffic', /fitnessMachineControlPoint/.test(downloadedText),
+    downloadedText.slice(0, 120));
+});
+
 report();
 settings.patch({ useMockDevices: simulatorDefault });
 session.dispose();

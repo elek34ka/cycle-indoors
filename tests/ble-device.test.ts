@@ -6,6 +6,7 @@ import { FakeBluetoothDevice, bytes, text, u16le, u32le } from './fake-gatt';
 const { FtmsTrainer } = await import('../src/devices/ble/ftms');
 const { BleHeartRateMonitor, BlePowerMeter } = await import('../src/devices/ble/sensors');
 const { CHARACTERISTIC, SERVICE } = await import('../src/devices/ble/uuids');
+const { bleLog } = await import('../src/devices/ble/log');
 const { check, near, report, suite } = await import('./harness');
 import type { Device, Telemetry } from '../src/devices/types';
 
@@ -192,6 +193,30 @@ suite('a trainer that reports a stop or reset is put back under control', () => 
     sentAfterStopped.join(' | ') === '00 | 07 | 05 d2 00', sentAfterStopped.join(' | '));
   check('after "reset": request control, start, then the target',
     sentAfterReset.join(' | ') === '00 | 07 | 05 dc 00', sentAfterReset.join(' | '));
+});
+
+// --- the Bluetooth log ---------------------------------------------------------
+const logMark = bleLog.entries().length;
+await trainer.control!.setTargetPower(120);
+await wait(10);
+const exchange = bleLog.entries().slice(logMark);
+const statusMark = bleLog.entries().length;
+machineStatus.notify(bytes2(0x08));
+const statusEntries = bleLog.entries().slice(statusMark);
+const bikeMark = bleLog.entries().length;
+bt.characteristic(SERVICE.fitnessMachine, CHARACTERISTIC.indoorBikeData)!
+  .notify(bytes(...u16le(0x0044), ...u16le(3250), ...u16le(176), ...u16le(238)));
+const bikeEntries = bleLog.entries().slice(bikeMark);
+
+suite('trainer traffic is written to the Bluetooth log', () => {
+  const summary = exchange.map((e) => `${e.kind} ${e.hex}`).join(' | ');
+  check('the target write, then its response', summary === 'write 05 78 00 | response 80 05 01', summary);
+  check('the response is decoded', exchange[1]?.note === 'set target power: success', exchange[1]?.note ?? 'none');
+  check('they are tagged with the trainer', exchange.every((e) => e.device === trainer.label));
+  check('a machine status logs one entry', statusEntries.length === 1 && statusEntries[0].hex === '08'
+    && statusEntries[0].note === 'target power changed', JSON.stringify(statusEntries));
+  check('a bike data packet logs one entry, decoded', bikeEntries.length === 1
+    && bikeEntries[0].note === '238 W, 32.50 km/h, 88 rpm', JSON.stringify(bikeEntries));
 });
 
 suite('a trainer that does not advertise spin-down offers no calibration', () => {

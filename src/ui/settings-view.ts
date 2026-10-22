@@ -24,6 +24,11 @@ const TOGGLES: ToggleSpec[] = [
     label: 'Keep the map centred on you',
     hint: 'Follows your position at close zoom. There is a Follow switch inside the map too.',
   },
+  {
+    key: 'debugMode',
+    label: 'Debug tools',
+    hint: 'Shows the Bluetooth log download under Devices, for diagnosing a misbehaving trainer.',
+  },
 ];
 
 interface FieldSpec {

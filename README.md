@@ -210,8 +210,21 @@ never offers it: there is nothing real to calibrate.
   Finish sent targets the trainer acknowledged but did not hold. Pause does
   not repeat the handshake.
 
-Like the rest of the BLE code, this has been tested against a fake GATT stack
-only, not against a real trainer.
+Like the rest of the BLE code, this has been tested against a fake GATT stack.
+The one real trainer it has met is a Van Rysel D500, which reported success
+but held ERG at about 0.42× the target afterwards, until power-cycled.
+
+**Bluetooth log.** With **Debug tools** switched on in Settings, Settings →
+Devices shows a **Download Bluetooth log** button. Recording runs whether or
+not debug mode is on, so a problem that has already happened can still be
+downloaded after switching it on. The app keeps, in memory, every control-point write, every control-point
+response, every machine status and every Indoor Bike Data packet (and the other
+sensors' notifications). Each entry is timestamped, tagged with the device,
+and carries the raw bytes plus a short decoding. The buffer holds the last
+20 000 entries. The file is plain text, one line per entry. It never leaves the
+computer unless the rider shares it, and it is gone when the page is reloaded.
+It exists so that a trainer that misbehaves can be diagnosed from what it
+actually said.
 
 ### What is deliberately not here yet
 
@@ -298,6 +311,9 @@ Two seams matter for the phases ahead:
   link, reconnect, receive again, take control, send ERG targets and gradients,
   lose control to the trainer and re-acquire it, disconnect deliberately. A
   trainer advertising spin-down offers it, and one that does not, does not.
+  A 120 W target lands in the Bluetooth log as the write `05 78 00` and then the
+  decoded response `80 05 01`. A machine status and a bike data packet each log
+  one decoded entry.
   Spin-down status packets arrive as signals, once each, even after a
   reconnect. A machine status of reset or stopped, or a spin-down result, makes
   the next target re-request control and Start. This
@@ -337,7 +353,12 @@ Two seams matter for the phases ahead:
   preceded by Request Control and Start. Pause and resume send only targets.
 - **calibration-panel** — the devices panel in jsdom: no Calibrate for the
   simulator or for a trainer without bit 15, disabled during a ride, and the
-  guided steps, result and Dismiss.
+  guided steps, result and Dismiss. Download Bluetooth log is hidden until
+  debug mode is on, and then hands the browser a `.txt` file holding exactly
+  the logged lines.
+- **ble-log** — the Bluetooth log on its own: order kept, bytes as hex from
+  either a `Uint8Array` or a `DataView`, characteristics named, the oldest
+  dropped past the limit, and an empty log that says so.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and seeking, loads the sample route and checks the climb

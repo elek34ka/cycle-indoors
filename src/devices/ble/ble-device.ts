@@ -1,6 +1,7 @@
 import { Emitter } from '../../core/pubsub';
 import type { Device, DeviceRole, DeviceStatus, Telemetry } from '../types';
 import { CHARACTERISTIC, SERVICE } from './uuids';
+import { bleLog, type BleLogKind } from './log';
 import { parseUtf8 } from './parsers';
 
 /** Backoff schedule for getting a dropped sensor back, in milliseconds.
@@ -146,18 +147,24 @@ export abstract class BleDevice implements Device {
     }));
   }
 
-  /** Subscribe to a characteristic. Returns false when it is not offered. */
+  /** Subscribe to a characteristic. Returns false when it is not offered.
+   *  Every packet is also written to the Bluetooth log, as `log.kind` (a
+   *  notification unless said otherwise) with `log.note`'s description. */
   protected async notifyOn(
     server: BluetoothRemoteGATTServer,
     service: number | string,
     characteristic: number | string,
     handler: (view: DataView) => void,
+    log: { kind?: BleLogKind; note?: (view: DataView) => string | undefined } = {},
   ): Promise<boolean> {
     const found = await this.getCharacteristic(server, service, characteristic);
     if (!found) return false;
     found.addEventListener('characteristicvaluechanged', (event) => {
       const value = (event.target as BluetoothRemoteGATTCharacteristic).value;
       if (!value) return;
+      let note: string | undefined;
+      try { note = log.note?.(value); } catch { /* a bad packet is still worth logging */ }
+      bleLog.record({ device: this.label, kind: log.kind ?? 'notify', uuid: characteristic, bytes: value, note });
       try { handler(value); } catch (err) { console.warn(`${this.label}: bad packet`, err); }
     }, { signal: this.link?.signal });
     await found.startNotifications();

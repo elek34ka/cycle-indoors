@@ -426,7 +426,7 @@ suite('tabs and the devices panel', () => {
     doc.querySelectorAll('#settings-form input[type="number"]').length === 6,
     `got ${doc.querySelectorAll('#settings-form input[type="number"]').length}`);
   check('the settings form rendered its toggles',
-    doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 4,
+    doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 5,
     `got ${doc.querySelectorAll('#settings-form input[type="checkbox"]').length}`);
   check('devices are managed from the settings page',
     (doc.querySelectorAll('#devices-panel .device-row').length ?? 0) === 2,

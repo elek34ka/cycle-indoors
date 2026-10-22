@@ -3,13 +3,14 @@ import type { SimulationParams, SpinDownSignal, TrainerControl, TrainerSpinDown 
 import { BleDevice } from './ble-device';
 import {
   CONTROL_OPCODE, FtmsControlPoint, encodeSimulation, encodeSpinDown, encodeStopOrPause,
-  encodeTargetPower, parseSpinDownTargets,
+  encodeTargetPower, opcodeName, parseControlResponse, parseSpinDownTargets,
 } from './ftms-control';
 import {
   parseFitnessMachineFeature, parseIndoorBikeData, parseSupportedPowerRange,
   type FitnessMachineFeatures, type PowerRange,
 } from './parsers';
 import { CHARACTERISTIC, SERVICE } from './uuids';
+import { bleLog } from './log';
 
 /** Fitness Machine Status (0x2ADA) opcodes. 0xFF is the one that matters: the
  *  trainer has taken control back, and it must be requested again. */
@@ -129,6 +130,7 @@ export class FtmsTrainer extends BleDevice {
     const subscribed = await this.notifyOn(
       server, SERVICE.fitnessMachine, CHARACTERISTIC.indoorBikeData,
       (view) => this.onBikeData(view),
+      { note: describeBikeData },
     );
     if (!subscribed) {
       throw new Error('This device offers the Fitness Machine Service but no Indoor Bike Data');
@@ -137,6 +139,7 @@ export class FtmsTrainer extends BleDevice {
     await this.notifyOn(
       server, SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineStatus,
       (view) => this.onMachineStatus(view),
+      { note: (view) => MACHINE_STATUS[view.getUint8(0)] },
     );
 
     await this.setUpControl(server);
@@ -153,9 +156,24 @@ export class FtmsTrainer extends BleDevice {
     await this.notifyOn(
       server, SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineControlPoint,
       (view) => this.controlPoint?.onIndication(view),
+      {
+        kind: 'response',
+        note: (view) => {
+          const response = parseControlResponse(view);
+          return response && `${opcodeName(response.requestOpcode)}: ${response.text}`;
+        },
+      },
     );
 
-    const point = new FtmsControlPoint({ write: (bytes) => write(characteristic, bytes) });
+    const point = new FtmsControlPoint({
+      write: (bytes) => {
+        bleLog.record({
+          device: this.label, kind: 'write', uuid: CHARACTERISTIC.fitnessMachineControlPoint,
+          bytes, note: opcodeName(bytes[0]),
+        });
+        return write(characteristic, bytes);
+      },
+    });
     this.controlPoint = point;
 
     // Ask for control now rather than on the first target, so a trainer that
@@ -239,4 +257,16 @@ export class FtmsTrainer extends BleDevice {
   get lastControlResult(): string | undefined {
     return this.controlPoint?.lastResult;
   }
+}
+
+/** What a bike data packet says, for the Bluetooth log. */
+function describeBikeData(view: DataView): string {
+  const d = parseIndoorBikeData(view);
+  const parts = [
+    d.power !== undefined ? `${d.power} W` : null,
+    d.speed !== undefined ? `${d.speed.toFixed(2)} km/h` : null,
+    d.cadence !== undefined ? `${d.cadence} rpm` : null,
+    d.resistance !== undefined ? `resistance ${d.resistance}` : null,
+  ].filter(Boolean);
+  return parts.join(', ');
 }

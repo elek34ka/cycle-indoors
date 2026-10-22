@@ -1,10 +1,12 @@
-import { int } from '../core/format';
+import { fileStamp, int } from '../core/format';
+import { downloadBytes } from '../activity/fit-export';
 import { settings } from '../core/settings';
 import { hub } from '../devices/hub';
 import { mock, registerMockDevices } from '../devices/setup';
 import { FtmsTrainer } from '../devices/ble/ftms';
 import { BlePowerMeter, BleHeartRateMonitor, BleSpeedCadenceSensor } from '../devices/ble/sensors';
 import { BleDevice } from '../devices/ble/ble-device';
+import { bleLog } from '../devices/ble/log';
 import {
   forgetDevice, isBluetoothAvailable, isBluetoothSupported, pairDevice,
   requiresSecureContext, type PairKind,
@@ -146,8 +148,37 @@ export class DevicesView {
         ),
       ]),
       this.sources,
+      this.buildDiagnosticsSection(),
       this.buildSimulatorSection(),
     );
+  }
+
+  /** The Bluetooth log, for diagnosing a trainer from what it actually said.
+   *  Only shown in debug mode; recording carries on regardless, so a log of the
+   *  problem is already there when debug mode is switched on afterwards. */
+  private buildDiagnosticsSection(): HTMLElement {
+    const section = el('div', { class: 'device-diagnostics' }, [
+      el('p', {
+        class: 'hint',
+        text: 'Every command sent to a trainer and everything it reports back is kept in memory '
+          + 'while this page is open. It stays on this computer unless you share the file.',
+      }),
+      el('div', { class: 'device-actions' }, [
+        el('button', {
+          class: 'btn btn-small',
+          text: 'Download Bluetooth log',
+          on: {
+            click: () => downloadBytes(
+              new TextEncoder().encode(bleLog.toText()),
+              `cycle-indoors-ble-${fileStamp(new Date())}.txt`,
+            ),
+          },
+        }),
+      ]),
+    ]);
+    section.hidden = !settings.current.debugMode;
+    settings.on('change', (s) => { section.hidden = !s.debugMode; });
+    return section;
   }
 
   /** The simulated rider is a development aid, so it is folded away and off by

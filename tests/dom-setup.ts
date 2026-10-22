@@ -45,6 +45,12 @@ export function setupDom(): JSDOM {
   }
   (window as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
 
+  // jsdom has no object URLs. A download revokes its URL on a timer, which can
+  // fire after a later test file has installed its own window, so every window
+  // gets harmless defaults that a test may override.
+  window.URL.createObjectURL ??= () => 'blob:jsdom';
+  window.URL.revokeObjectURL ??= () => {};
+
   const globals = globalThis as Record<string, unknown>;
   // Node exposes `navigator` as a getter, so it needs redefining rather than assigning.
   Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true, writable: true });

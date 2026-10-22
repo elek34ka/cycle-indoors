@@ -15,6 +15,8 @@ export interface Settings {
   autoConnectBle: boolean;
   /** the ride view's left panel (workout and route) */
   showSidebar: boolean;
+  /** shows diagnostic tools, such as the Bluetooth log download */
+  debugMode: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -29,6 +31,7 @@ const DEFAULTS: Settings = {
   miniMapFollow: true,
   autoConnectBle: true,
   showSidebar: true,
+  debugMode: false,
 };
 
 const KEY = 'cycle-indoors.settings.v1';
