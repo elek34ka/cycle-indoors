@@ -1,7 +1,9 @@
-import type { SimulationParams, TrainerControl } from '../types';
+import { Emitter } from '../../core/pubsub';
+import type { SimulationParams, SpinDownSignal, TrainerControl, TrainerSpinDown } from '../types';
 import { BleDevice } from './ble-device';
 import {
-  CONTROL_OPCODE, FtmsControlPoint, encodeSimulation, encodeStopOrPause, encodeTargetPower,
+  CONTROL_OPCODE, FtmsControlPoint, encodeSimulation, encodeSpinDown, encodeStopOrPause,
+  encodeTargetPower, parseSpinDownTargets,
 } from './ftms-control';
 import {
   parseFitnessMachineFeature, parseIndoorBikeData, parseSupportedPowerRange,
@@ -29,6 +31,23 @@ const MACHINE_STATUS: Record<number, string> = {
 };
 
 const CONTROL_LOST = 0xff;
+const SPIN_DOWN_STATUS = 0x14;
+
+/** The parameter of a spin-down status (0x14). */
+const SPIN_DOWN_SIGNAL: Record<number, SpinDownSignal> = {
+  0x01: 'speedUp',
+  0x02: 'success',
+  0x03: 'error',
+  0x04: 'stopPedalling',
+};
+
+const SPIN_DOWN_TEXT: Record<SpinDownSignal, string> = {
+  speedUp: 'spin-down: speed up',
+  stopPedalling: 'spin-down: stop pedalling',
+  success: 'spin-down succeeded',
+  error: 'spin-down failed',
+  controlLost: 'control permission lost',
+};
 
 async function write(characteristic: BluetoothRemoteGATTCharacteristic, bytes: Uint8Array): Promise<void> {
   // Prefer an acknowledged write: an unacknowledged one can be dropped silently.
@@ -49,6 +68,20 @@ export class FtmsTrainer extends BleDevice {
   controlError: string | undefined;
 
   private controlPoint: FtmsControlPoint | undefined;
+  private readonly spinDownBus = new Emitter<{ signal: SpinDownSignal }>();
+
+  private readonly spinDownApi: TrainerSpinDown = {
+    start: async () => {
+      const point = this.requireControl();
+      const response = await point.command(encodeSpinDown(true), CONTROL_OPCODE.spinDownControl);
+      return response ? parseSpinDownTargets(response.parameters) : undefined;
+    },
+    cancel: async () => {
+      const point = this.requireControl();
+      await point.command(encodeSpinDown(false), CONTROL_OPCODE.spinDownControl);
+    },
+    onSignal: (handler) => this.spinDownBus.on('signal', handler),
+  };
 
   private readonly api: TrainerControl = {
     setTargetPower: async (watts: number) => {
@@ -82,6 +115,9 @@ export class FtmsTrainer extends BleDevice {
 
     const feature = await this.readOnce(server, SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineFeature);
     if (feature) this.features = parseFitnessMachineFeature(feature);
+    // Only offered to trainers that say they can, so the panel never shows a
+    // Calibrate button that can only end in "opcode not supported".
+    this.api.spinDown = this.features?.canSet.spinDown ? this.spinDownApi : undefined;
 
     const range = await this.readOnce(server, SERVICE.fitnessMachine, CHARACTERISTIC.supportedPowerRange);
     if (range && range.byteLength >= 6) this.powerRange = parseSupportedPowerRange(range);
@@ -157,6 +193,14 @@ export class FtmsTrainer extends BleDevice {
     if (opcode === CONTROL_LOST) {
       // Next command re-requests control instead of failing.
       this.controlPoint?.invalidate();
+      this.spinDownBus.emit('signal', 'controlLost');
+    }
+    if (opcode === SPIN_DOWN_STATUS && view.byteLength >= 2) {
+      const signal = SPIN_DOWN_SIGNAL[view.getUint8(1)];
+      if (signal) {
+        this.lastMachineStatus = SPIN_DOWN_TEXT[signal];
+        this.spinDownBus.emit('signal', signal);
+      }
     }
   }
 

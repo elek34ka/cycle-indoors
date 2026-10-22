@@ -33,7 +33,7 @@ tablet on the same network you would need to serve the app over https.
 | 1 | Full UI driven by a simulated trainer and strap | **done** |
 | 2 | Real Bluetooth connections (FTMS trainer, HR strap, power meter, speed/cadence) | **done** |
 | 3 | Trainer control: ERG targets and free/simulation mode over BLE | **done** |
-| 4 | Polish, then a backend | next |
+| 4 | Polish (spin-down calibration so far), then a backend | **current** |
 
 ### What phase 1 gives you
 
@@ -179,11 +179,37 @@ flowing.
 express the 0–100 ranges trainers actually advertise, and implementations
 disagree. ERG and simulation cover every trainer this app has a use for.
 
+### What phase 4 added
+
+**Spin-down calibration.** A trainer that advertises spin-down support (Fitness
+Machine Feature, target-setting bit 15) and has a control point gets a
+**Calibrate** button on its row in Settings → Devices. The simulated trainer
+never offers it: there is nothing real to calibrate.
+
+- Pressing it sends `Spin Down Control` (opcode 0x13, parameter 0x01) through
+  the same single control-point queue as every other command. If the trainer's
+  answer carries a target speed window, the row asks the rider to speed up past
+  the high target and shows the window next to the live speed. Without one, it
+  asks the rider to speed up until told to stop.
+- The trainer's spin-down status (machine status 0x14) drives the rest:
+  "stop pedalling" (0x04) switches the row to coasting, and success (0x02) or
+  error (0x03) end it. The result stays on the row until dismissed.
+- **Cancel** sends parameter 0x02 (ignore). A spin-down ends as failed if the
+  trainer has reported no result after 90 seconds, if it disconnects, or if it
+  takes control back (0xFF).
+- It is setup-only. The button is disabled while a ride is running or paused,
+  and while a spin-down runs, Start is refused with a message, so no ERG or
+  simulation target can land in the middle of it. The session owns all of
+  this, as it owns every other trainer write.
+
+Like the rest of the BLE code, this has been tested against a fake GATT stack
+only, not against a real trainer.
+
 ### What is deliberately not here yet
 
 No ride history or workout library persistence, no
-account, no upload integrations, no calibration/spindown, no virtual-gear or
-steering support.
+account, no upload integrations, no power meter zero-offset calibration, no
+virtual-gear or steering support.
 
 ## Layout
 
@@ -193,7 +219,8 @@ src/
   workout/     workout model, .zwo parser, .fit workout parser, sample library
   fit/         FIT binary layer: CRC, profile tables, decoder, encoder
   activity/    track model, course model, GPX parser, FIT activity reader/writer
-  session/     the ride engine (state machine, recorder, trainer commands), metrics
+  session/     the ride engine (state machine, recorder, trainer commands), metrics,
+               spin-down calibration state
   devices/     Device/TrainerControl interfaces, hub, physics, simulated rider
   devices/ble/ Web Bluetooth: UUIDs, characteristic parsers, revolution
                trackers, GATT transport with reconnect, pairing
@@ -250,6 +277,8 @@ Two seams matter for the phases ahead:
   requested once rather than once per command, concurrent commands serialised
   **and ordered**, a silent trainer still ridable, a refusal surfaced, control
   re-acquired after it is revoked, and a failed GATT write not jamming the queue.
+  Also the spin-down packet, its target speed window, and a command resolving
+  with its own response even when queued behind another.
 - **erg-integration** — the whole chain in one test: a workout block's target
   becomes the right bytes on a fake trainer's control point, the bias control
   moves them, a mid-ride dropout reconnects and gets the target pushed again,
@@ -258,7 +287,10 @@ Two seams matter for the phases ahead:
 - **ble-device** — drives the real device classes through a fake GATT stack:
   connect, read features/battery/identity, subscribe, receive packets, lose the
   link, reconnect, receive again, take control, send ERG targets and gradients,
-  lose control to the trainer and re-acquire it, disconnect deliberately. This
+  lose control to the trainer and re-acquire it, disconnect deliberately. A
+  trainer advertising spin-down offers it, and one that does not, does not.
+  Spin-down status packets arrive as signals, once each, even after a
+  reconnect. This
   is what caught
   the duplicate-listener bug: Chrome returns the *same* characteristic object
   after a reconnect, so every packet was being handled twice until listeners
@@ -283,6 +315,17 @@ Two seams matter for the phases ahead:
 - **wake-lock** — the screen lock is taken on start, not stacked, not requested
   while hidden, re-taken on return, and a refusal is only a warning.
 - **sidebar** — a sidebar folded away before a reload starts folded.
+- **spin-down** — every transition of the pure spin-down state machine,
+  including a status that overtakes its response and a late status that must
+  not overturn a result, and the text the trainer row shows for each step.
+- **calibration-session** — the session against a fake spin-down trainer.
+  Calibration is refused mid-ride. Start is refused mid-calibration, with zero
+  target writes reaching the trainer. It covers success, cancel (which sends
+  ignore), the 90 s timeout and a mid-spin-down disconnect, and checks that a
+  ride starts normally afterwards.
+- **calibration-panel** — the devices panel in jsdom: no Calibrate for the
+  simulator or for a trainer without bit 15, disabled during a ride, and the
+  guided steps, result and Dismiss.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and seeking, loads the sample route and checks the climb

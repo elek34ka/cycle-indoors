@@ -8,6 +8,7 @@ import { DEFAULT_BIKE, stepSpeed } from '../devices/physics';
 import type { Telemetry } from '../devices/types';
 import { segmentAt, targetRatioAt, type Segment, type Workout } from '../workout/types';
 import type { Sample } from './metrics';
+import { SPIN_DOWN_IDLE, isActive, spinDownReduce, type SpinDownEvent, type SpinDownState } from './spin-down';
 
 export type SessionState = 'idle' | 'running' | 'paused' | 'finished';
 export type RideMode = 'erg' | 'free';
@@ -66,6 +67,7 @@ type SessionEvents = {
   segment: { segment: Segment | undefined; index: number };
   message: string;
   finished: SessionSnapshot;
+  calibration: SpinDownState;
 };
 
 /** Collapses rapid target changes into at most one trainer write per interval.
@@ -102,6 +104,10 @@ const SAMPLE_INTERVAL = 1; // second
 const BUFFER_SECONDS = 31;
 const WORKOUT_DONE_MESSAGE = 'Workout complete — free riding from here';
 const WORKOUT_DONE_SECONDS = 12;
+/** Most spin-downs take 20–40 s; past this, the trainer is not going to answer. */
+export const SPIN_DOWN_TIMEOUT_MS = 90_000;
+const CALIBRATING_MESSAGE = 'Calibration in progress — finish or cancel it first';
+const CALIBRATING_SECONDS = 5;
 
 interface RunningTotals { power: number; powerCount: number; hr: number; hrCount: number; }
 
@@ -140,11 +146,15 @@ export class Session extends Emitter<SessionEvents> {
   private firedEvents = new Set<number>();
   private commands = new CommandQueue(500);
   private raf: number | undefined;
+  private spinDown: SpinDownState = SPIN_DOWN_IDLE;
+  /** bumped per calibration, so a slow answer to an abandoned one is ignored */
+  private spinDownRun = 0;
+  private spinDownWatch: (() => void)[] = [];
   startedAt: Date | undefined;
   /** set once the rider has downloaded this ride, so it can be discarded safely */
   exported = false;
 
-  constructor(private readonly devices: DeviceHub) {
+  constructor(private readonly devices: DeviceHub, private readonly spinDownTimeoutMs = SPIN_DOWN_TIMEOUT_MS) {
     super();
     this.devices.on('telemetry', (t) => { this.live = t; });
     // A new or removed route restarts the virtual speed from what the sensors say.
@@ -255,6 +265,73 @@ export class Session extends Emitter<SessionEvents> {
     return count ? Math.round(sum / count) : Math.round(latest);
   }
 
+  // ---- calibration ---------------------------------------------------------
+
+  get calibration(): SpinDownState { return this.spinDown; }
+
+  /** Whether the trainer can be calibrated now, or why not. */
+  get canCalibrate(): boolean {
+    return (this.state === 'idle' || this.state === 'finished') && !isActive(this.spinDown);
+  }
+
+  /**
+   * Run a spin-down on the active trainer. Only between rides: the session
+   * writes nothing to the trainer while idle or finished, and refuses to start
+   * a ride until the spin-down ends, so the two never share the brake.
+   * Resolves once the trainer has answered the request; the result arrives
+   * later on the 'calibration' event.
+   */
+  async calibrate(): Promise<void> {
+    if (this.state === 'running' || this.state === 'paused') throw new Error('Finish the ride first');
+    if (isActive(this.spinDown)) throw new Error('Calibration is already running');
+    const trainer = this.devices.trainer;
+    const spinDown = this.devices.control?.spinDown;
+    if (!trainer || !spinDown) throw new Error('This trainer cannot be calibrated');
+
+    const run = ++this.spinDownRun;
+    this.applySpinDown({ type: 'requested' });
+    const timer = window.setTimeout(() => this.applySpinDown({ type: 'timeout' }), this.spinDownTimeoutMs);
+    this.spinDownWatch = [
+      () => clearTimeout(timer),
+      spinDown.onSignal((signal) => this.applySpinDown({ type: 'signal', signal })),
+      trainer.onStatus((status) => {
+        if (status !== 'connected') this.applySpinDown({ type: 'disconnected' });
+      }),
+    ];
+
+    try {
+      const targets = await spinDown.start();
+      if (run === this.spinDownRun) this.applySpinDown({ type: 'accepted', targets });
+    } catch (err) {
+      if (run === this.spinDownRun) this.applySpinDown({ type: 'refused', reason: (err as Error).message });
+    }
+  }
+
+  cancelCalibration(): void {
+    if (!isActive(this.spinDown)) return;
+    const spinDown = this.devices.control?.spinDown;
+    this.applySpinDown({ type: 'cancelled' });
+    // The row is back to normal whether or not the trainer hears this.
+    spinDown?.cancel().catch(() => {});
+  }
+
+  /** Clear a finished calibration's result from the trainer row. */
+  dismissCalibration(): void {
+    this.applySpinDown({ type: 'dismissed' });
+  }
+
+  private applySpinDown(event: SpinDownEvent): void {
+    const next = spinDownReduce(this.spinDown, event);
+    if (next === this.spinDown) return;
+    const wasActive = isActive(this.spinDown);
+    this.spinDown = next;
+    if (wasActive && !isActive(next)) {
+      this.spinDownWatch.forEach((stop) => stop());
+      this.spinDownWatch = [];
+    }
+    this.emit('calibration', next);
+  }
+
   // ---- workout -------------------------------------------------------------
 
   loadWorkout(workout: Workout | undefined): void {
@@ -274,6 +351,13 @@ export class Session extends Emitter<SessionEvents> {
 
   start(): void {
     if (this.state === 'running') return;
+    // A target sent now would land in the middle of the trainer's spin-down.
+    if (isActive(this.spinDown)) {
+      this.message = CALIBRATING_MESSAGE;
+      this.messageUntil = performance.now() + CALIBRATING_SECONDS * 1000;
+      this.emit('message', CALIBRATING_MESSAGE);
+      return;
+    }
     if (this.state === 'finished' || this.state === 'idle') this.resetRide();
     this.startedAt ??= new Date();
     this.setState('running');

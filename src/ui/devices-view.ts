@@ -10,6 +10,8 @@ import {
   requiresSecureContext, type PairKind,
 } from '../devices/ble/pair';
 import type { Device } from '../devices/types';
+import { session } from '../session/session';
+import { describeSpinDown, isActive } from '../session/spin-down';
 import { clear, el, qs, setClass, setText, toast } from './dom';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -45,6 +47,9 @@ interface Row {
   live: HTMLElement;
   detail: HTMLElement;
   action: HTMLButtonElement;
+  calibration: HTMLElement;
+  calibrationText: HTMLElement;
+  calibrationButton: HTMLButtonElement;
 }
 
 /** Device management lives on the Settings page; the top bar only shows status. */
@@ -61,6 +66,9 @@ export class DevicesView {
     this.buildPanel();
     hub.on('devices', () => { this.syncRows(); this.renderChips(true); });
     hub.on('telemetry', () => this.renderChips(false));
+    // Calibration steps should not wait for the next refresh to show.
+    session.on('calibration', () => this.refreshLive());
+    session.on('state', () => this.refreshLive());
     window.setInterval(() => this.refreshLive(), LIVE_REFRESH_MS);
     this.syncRows();
     this.renderChips(true);
@@ -282,17 +290,61 @@ export class DevicesView {
       }));
     }
 
+    // One button whose job follows the calibration: Calibrate, Cancel, Dismiss.
+    const calibrationText = el('span', { class: 'calibration-text' });
+    const calibrationButton = el('button', { class: 'btn btn-small' }) as HTMLButtonElement;
+    calibrationButton.addEventListener('click', () => this.calibrationAction());
+    const calibration = el('div', { class: 'calibration' }, [calibrationButton, calibrationText]);
+    calibration.hidden = true;
+
     const root = el('div', { class: 'device-row' }, [
       el('div', {}, [
         el('div', { class: 'name', text: device.label }),
         sub,
         detail,
         live,
+        calibration,
       ]),
       el('div', { class: 'device-row-actions' }, buttons),
     ]);
     this.list.append(root);
-    return { root, sub, live, detail, action };
+    return { root, sub, live, detail, action, calibration, calibrationText, calibrationButton };
+  }
+
+  private calibrationAction(): void {
+    const phase = session.calibration.phase;
+    if (isActive(session.calibration)) session.cancelCalibration();
+    else if (phase === 'succeeded' || phase === 'failed') session.dismissCalibration();
+    else session.calibrate().catch((err) => toast((err as Error).message, 'error'));
+  }
+
+  /** Only the trainer in charge, only while connected, and only if it says it
+   *  can spin down — the simulated trainer never does. */
+  private renderCalibration(device: Device, row: Row, speed: number | undefined): void {
+    const offered = device === hub.trainer && device.status === 'connected'
+      && device.control?.spinDown !== undefined;
+    row.calibration.hidden = !offered;
+    if (!offered) return;
+
+    const state = session.calibration;
+    const phase = state.phase;
+    setClass(row.calibration, 'calibration-ok', phase === 'succeeded');
+    setClass(row.calibration, 'calibration-error', phase === 'failed');
+
+    if (phase === 'idle') {
+      const allowed = session.canCalibrate;
+      setText(row.calibrationButton, 'Calibrate');
+      row.calibrationButton.disabled = !allowed;
+      row.calibrationButton.title = allowed
+        ? 'Spin-down calibration: speed up, then coast while the trainer measures itself'
+        : 'Finish the ride first';
+      setText(row.calibrationText, allowed ? '' : 'Finish the ride first to calibrate');
+      return;
+    }
+    row.calibrationButton.disabled = false;
+    row.calibrationButton.title = '';
+    setText(row.calibrationButton, isActive(state) ? 'Cancel' : 'Dismiss');
+    setText(row.calibrationText, describeSpinDown(state, speed));
   }
 
   private async toggleDevice(device: Device, button: HTMLButtonElement): Promise<void> {
@@ -341,6 +393,7 @@ export class DevicesView {
       setText(row.action, device.status === 'connected' ? 'Disconnect' : device.status === 'connecting' ? '…' : 'Connect');
       setClass(row.action, 'btn-primary', device.status !== 'connected' && device.status !== 'connecting');
       row.action.disabled = device.status === 'connecting';
+      this.renderCalibration(device, row, snapshot.speed);
     }
 
     setText(this.simButton, this.simulatorActive()

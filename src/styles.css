@@ -581,6 +581,11 @@ input[type="number"], input[type="text"] {
 .device-row .detail:empty, .device-row .live:empty { display: none; }
 .device-row .live { font-size: 13px; color: var(--accent); font-family: var(--mono); margin-top: 2px; }
 .device-row-actions { display: flex; gap: 6px; align-items: center; }
+.device-row .calibration { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.device-row .calibration[hidden] { display: none; }
+.device-row .calibration-text { font-size: 13px; color: var(--text-dim); }
+.device-row .calibration.calibration-ok .calibration-text { color: var(--good); }
+.device-row .calibration.calibration-error .calibration-text { color: #ffb3a4; }
 
 .pair-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .device-actions { display: flex; gap: 8px; flex-wrap: wrap; }

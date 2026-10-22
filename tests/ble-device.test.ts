@@ -175,6 +175,107 @@ suite('finishing releases the brake', () => {
   check('a stop was sent', cpWrites()[beforeStop] === '08 01', cpWrites()[beforeStop]);
 });
 
+suite('a trainer that does not advertise spin-down offers no calibration', () => {
+  check('no spin-down without feature bit 15', trainer.control!.spinDown === undefined);
+});
+
+// --- spin-down calibration -------------------------------------------------
+/** A trainer advertising spin-down (target-setting bit 15). Its control point
+ *  answers 0x13 with `spinReply` and everything else with success. */
+function buildSpinTrainer(id: string, spinReply: (bytes: Uint8Array) => DataView): FakeBluetoothDevice {
+  const spinBt = new FakeBluetoothDevice(id, 'Spin Trainer');
+  const service = spinBt.service(SERVICE.fitnessMachine);
+  service.add(CHARACTERISTIC.indoorBikeData);
+  service.add(CHARACTERISTIC.fitnessMachineStatus);
+  service.add(CHARACTERISTIC.fitnessMachineControlPoint).onWrite =
+    (written) => (written[0] === 0x13 ? spinReply(written) : ack(written));
+  service.add(CHARACTERISTIC.fitnessMachineFeature, bytes(
+    ...u32le((1 << 1) | (1 << 14)),
+    ...u32le((1 << 3) | (1 << 13) | (1 << 15)),
+  ));
+  return spinBt;
+}
+
+const spinBt = buildSpinTrainer('spin-trainer',
+  (written) => bytes2(0x80, 0x13, 0x01, ...(written[1] === 0x01 ? [0xd0, 0x07, 0xac, 0x0d] : [])));
+const spinTrainer = new FtmsTrainer(spinBt as unknown as BluetoothDevice);
+await spinTrainer.connect();
+await wait(60);
+const spinControl = spinBt.characteristic(SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineControlPoint)!;
+const spinStatus = spinBt.characteristic(SERVICE.fitnessMachine, CHARACTERISTIC.fitnessMachineStatus)!;
+const signals: string[] = [];
+spinTrainer.control!.spinDown?.onSignal((signal) => signals.push(signal));
+
+const beforeSpin = spinControl.writes.length;
+const targets = await spinTrainer.control!.spinDown!.start();
+
+suite('a spin-down is requested over the control point', () => {
+  check('bit 15 makes spin-down available', spinTrainer.control?.spinDown !== undefined);
+  const sent = spinControl.writes.map(hex).slice(beforeSpin);
+  check('the start went out as 0x13 0x01', sent.includes('13 01'), sent.join(' | '));
+  check('control was held first', spinControl.writes.map(hex).indexOf('00') < spinControl.writes.map(hex).indexOf('13 01'),
+    spinControl.writes.map(hex).join(' | '));
+  check('the target window came back', targets?.lowKph === 20 && targets?.highKph === 35, JSON.stringify(targets));
+});
+
+spinStatus.notify(bytes2(0x14, 0x01));
+spinStatus.notify(bytes2(0x14, 0x04));
+spinStatus.notify(bytes2(0x14, 0x02));
+spinStatus.notify(bytes2(0x14, 0x03));
+spinStatus.notify(bytes2(0xff));
+spinStatus.notify(bytes2(0x14)); // truncated, ignored
+
+suite('spin-down status reaches the listener', () => {
+  check('each status maps to its signal, and a truncated one is ignored',
+    signals.join(' ') === 'speedUp stopPedalling success error controlLost', signals.join(' '));
+  check('the panel text follows the spin-down',
+    spinTrainer.lastMachineStatus === 'spin-down status', spinTrainer.lastMachineStatus ?? 'none');
+});
+
+spinStatus.notify(bytes2(0x14, 0x02));
+suite('the panel shows the spin-down result', () => {
+  check('a success reads as such',
+    spinTrainer.lastMachineStatus === 'spin-down succeeded', spinTrainer.lastMachineStatus ?? 'none');
+});
+
+const beforeCancel = spinControl.writes.length;
+await spinTrainer.control!.spinDown!.cancel();
+
+suite('cancelling sends ignore', () => {
+  // Control was taken back by the 0xFF above, so it is requested again first.
+  const sent = spinControl.writes.map(hex).slice(beforeCancel);
+  check('0x13 0x02 went out, after re-requesting control', sent.join(' | ') === '00 | 07 | 13 02',
+    sent.join(' | '));
+});
+
+signals.length = 0;
+spinBt.drop();
+await wait(1400);
+spinStatus.notify(bytes2(0x14, 0x04));
+
+suite('a reconnect does not double spin-down signals', () => {
+  check('it reconnected', spinTrainer.status === 'connected', spinTrainer.status);
+  check('one status gives one signal', signals.join(' ') === 'stopPedalling', signals.join(' '));
+});
+await spinTrainer.disconnect();
+
+const refusingSpinBt = buildSpinTrainer('refusing-spin', () => bytes2(0x80, 0x13, 0x02));
+const refusingSpin = new FtmsTrainer(refusingSpinBt as unknown as BluetoothDevice);
+await refusingSpin.connect();
+await wait(60);
+let spinError = '';
+try {
+  await refusingSpin.control!.spinDown!.start();
+} catch (err) {
+  spinError = (err as Error).message;
+}
+await refusingSpin.disconnect();
+
+suite('a refused spin-down says why', () => {
+  check('start rejected', spinError !== '', 'resolved');
+  check('with the trainer’s reason', /opcode not supported/.test(spinError), spinError);
+});
+
 const readOnlyBt = new FakeBluetoothDevice('readonly-trainer', 'Dumb Trainer');
 readOnlyBt.service(SERVICE.fitnessMachine).add(CHARACTERISTIC.indoorBikeData);
 readOnlyBt.service(SERVICE.fitnessMachine)

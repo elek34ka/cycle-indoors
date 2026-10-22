@@ -1,4 +1,4 @@
-import type { SimulationParams } from '../types';
+import type { SimulationParams, SpinDownTargets } from '../types';
 
 /** Fitness Machine Control Point (0x2AD9) opcodes, FTMS v1.0 section 4.16. */
 export const CONTROL_OPCODE = {
@@ -8,6 +8,7 @@ export const CONTROL_OPCODE = {
   startOrResume: 0x07,
   stopOrPause: 0x08,
   setSimulation: 0x11,
+  spinDownControl: 0x13,
   responseCode: 0x80,
 } as const;
 
@@ -34,6 +35,7 @@ const OPCODE_TEXT: Record<number, string> = {
   [CONTROL_OPCODE.startOrResume]: 'start',
   [CONTROL_OPCODE.stopOrPause]: 'stop',
   [CONTROL_OPCODE.setSimulation]: 'set simulation',
+  [CONTROL_OPCODE.spinDownControl]: 'spin down',
 };
 
 export function opcodeName(opcode: number): string {
@@ -81,14 +83,32 @@ export function encodeSimulation(params: SimulationParams): Uint8Array {
   return out;
 }
 
+/** Spin Down Control: 0x01 starts a spin-down, 0x02 abandons one. */
+export function encodeSpinDown(start: boolean): Uint8Array {
+  return Uint8Array.of(CONTROL_OPCODE.spinDownControl, start ? 0x01 : 0x02);
+}
+
+/** A successful spin-down response carries the target speed low and high,
+ *  each a uint16 at 0.01 km/h. Not every trainer sends them. */
+export function parseSpinDownTargets(parameters: DataView): SpinDownTargets | undefined {
+  if (parameters.byteLength < 4) return undefined;
+  return {
+    lowKph: parameters.getUint16(0, true) / 100,
+    highKph: parameters.getUint16(2, true) / 100,
+  };
+}
+
 export interface ControlResponse {
   requestOpcode: number;
   result: number;
   ok: boolean;
   text: string;
+  /** whatever follows the result code — response parameters, if any */
+  parameters: DataView;
 }
 
-/** Responses arrive as an indication: 0x80, request opcode, result code. */
+/** Responses arrive as an indication: 0x80, request opcode, result code, then
+ *  any response parameters. */
 export function parseControlResponse(view: DataView): ControlResponse | undefined {
   if (view.byteLength < 3) return undefined;
   if (view.getUint8(0) !== CONTROL_OPCODE.responseCode) return undefined;
@@ -99,6 +119,7 @@ export function parseControlResponse(view: DataView): ControlResponse | undefine
     result,
     ok: result === RESULT.success,
     text: RESULT_TEXT[result] ?? `result 0x${result.toString(16)}`,
+    parameters: new DataView(view.buffer, view.byteOffset + 3, view.byteLength - 3),
   };
 }
 
@@ -167,12 +188,15 @@ export class FtmsControlPoint {
    * command interleave between the control request and the target, which both
    * duplicates the request and — worse — can deliver targets out of order,
    * leaving the trainer holding a wattage the workout has already moved past.
+   *
+   * Resolves with the trainer's answer, so callers can read its response
+   * parameters, or with `undefined` when the trainer never acknowledges.
    */
-  async command(bytes: Uint8Array, opcode: number): Promise<void> {
+  async command(bytes: Uint8Array, opcode: number): Promise<ControlResponse | undefined> {
     return this.enqueue(async () => {
       await this.grantControl();
       const response = await this.transfer(bytes, opcode);
-      if (!response || response.ok) return;
+      if (!response || response.ok) return response;
       if (response.result === RESULT.notPermitted) this.granted = false;
       throw new Error(`${opcodeName(opcode)} failed: ${response.text}`);
     });

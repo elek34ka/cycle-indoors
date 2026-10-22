@@ -1,7 +1,7 @@
 import {
-  CONTROL_OPCODE, FtmsControlPoint, RESULT, encodeRequestControl, encodeSimulation,
+  CONTROL_OPCODE, FtmsControlPoint, RESULT, encodeRequestControl, encodeSimulation, encodeSpinDown,
   encodeStartOrResume, encodeStopOrPause, encodeTargetPower, opcodeName, parseControlResponse,
-  type ControlPointIO,
+  parseSpinDownTargets, type ControlPointIO,
 } from '../src/devices/ble/ftms-control';
 import { check, near, report, suite } from './harness';
 
@@ -42,6 +42,10 @@ suite('control point encoders', () => {
     hex(clamped).endsWith('ff ff'), hex(clamped));
 
   check('opcodes have names', opcodeName(CONTROL_OPCODE.setTargetPower) === 'set target power');
+  check('spin down start', hex(encodeSpinDown(true)) === '13 01', hex(encodeSpinDown(true)));
+  check('spin down ignore', hex(encodeSpinDown(false)) === '13 02', hex(encodeSpinDown(false)));
+  check('spin down has a name', opcodeName(CONTROL_OPCODE.spinDownControl) === 'spin down');
+
   check('unknown opcodes still read sensibly', opcodeName(0x42) === 'opcode 0x42', opcodeName(0x42));
 });
 
@@ -54,6 +58,21 @@ suite('control point responses', () => {
   check('control not permitted is recognised', !denied.ok && denied.text === 'control not permitted', denied.text);
   check('unsupported opcodes are recognised',
     parseControlResponse(response(0x05, RESULT.notSupported))!.text === 'opcode not supported');
+
+  check('a bare response has no parameters', ok.parameters.byteLength === 0, String(ok.parameters.byteLength));
+
+  // 0x07d0 = 2000 -> 20 km/h, 0x0dac = 3500 -> 35 km/h
+  const spin = parseControlResponse(dv(0x80, 0x13, 0x01, 0xd0, 0x07, 0xac, 0x0d))!;
+  check('a spin-down response keeps its parameters', spin.ok && spin.parameters.byteLength === 4,
+    String(spin.parameters.byteLength));
+  const targets = parseSpinDownTargets(spin.parameters);
+  near('target speed low is 0.01 km/h per bit', targets?.lowKph ?? -1, 20, 0.001);
+  near('target speed high is 0.01 km/h per bit', targets?.highKph ?? -1, 35, 0.001);
+  const bare = parseControlResponse(dv(0x80, 0x13, 0x01))!;
+  check('a spin-down response without parameters has no targets',
+    parseSpinDownTargets(bare.parameters) === undefined);
+  check('a truncated target pair is not read',
+    parseSpinDownTargets(dv(0xd0, 0x07, 0xac)) === undefined);
 
   check('a short packet is not a response', parseControlResponse(dv(0x80, 0x05)) === undefined);
   check('a packet that is not 0x80 is not a response',
@@ -138,16 +157,43 @@ suite('concurrent commands are serialised and ordered', () => {
     serial.writes.join(' | ') === '00 | 07 | 05 64 00 | 05 c8 00 | 05 2c 01', serial.writes.join(' | '));
 });
 
+// --- a spin-down queued behind a target ------------------------------------
+const spinning = new FakeIo();
+spinning.delayMs = 10;
+spinning.reply = (bytes) => (bytes[0] === CONTROL_OPCODE.spinDownControl
+  ? dv(0x80, 0x13, RESULT.success, 0xd0, 0x07, 0xac, 0x0d)
+  : response(bytes[0], RESULT.success));
+const spinningPoint = new FtmsControlPoint(spinning, 200);
+spinning.point = spinningPoint;
+
+const [targetAnswer, spinAnswer] = await Promise.all([
+  spinningPoint.command(encodeTargetPower(150), CONTROL_OPCODE.setTargetPower),
+  spinningPoint.command(encodeSpinDown(true), CONTROL_OPCODE.spinDownControl),
+]);
+
+suite('a command resolves with its own response', () => {
+  check('the spin-down goes out after the target, in the same queue',
+    spinning.writes.join(' | ') === '00 | 07 | 05 96 00 | 13 01', spinning.writes.join(' | '));
+  check('never two GATT writes at once', spinning.maxInflight === 1, String(spinning.maxInflight));
+  check('the target resolves with its bare success',
+    targetAnswer?.requestOpcode === CONTROL_OPCODE.setTargetPower && targetAnswer.parameters.byteLength === 0);
+  check('the spin-down resolves with its own parameters',
+    spinAnswer?.requestOpcode === CONTROL_OPCODE.spinDownControl
+      && parseSpinDownTargets(spinAnswer.parameters)?.highKph === 35,
+    JSON.stringify(spinAnswer && parseSpinDownTargets(spinAnswer.parameters)));
+});
+
 // --- a trainer that never answers ------------------------------------------
 const silent = new FakeIo();
 const silentPoint = new FtmsControlPoint(silent, 60);
 silent.point = silentPoint;
-await silentPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
+const silentAnswer = await silentPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
 
 suite('a trainer that never acknowledges is still ridable', () => {
   check('the target was still sent', silent.writes.includes('05 c8 00'), silent.writes.join(' | '));
   check('it is flagged as silent so the panel can say so', silentPoint.silent);
   check('control is assumed rather than blocking the ride', silentPoint.hasControl);
+  check('the command resolves with no response', silentAnswer === undefined);
 });
 
 // --- a trainer that refuses control ----------------------------------------
