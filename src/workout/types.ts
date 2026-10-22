@@ -14,6 +14,9 @@ export interface Segment {
   /** source element: Warmup, SteadyState, IntervalsT(on/off), FreeRide, Ramp, Cooldown */
   kind: string;
   label: string;
+  /** the block's own name without its target ("1/5", "Recover", a FIT step
+   *  name); undefined when the block is described by its target alone */
+  name?: string;
 }
 
 export interface TextEvent { time: number; duration: number; message: string; }

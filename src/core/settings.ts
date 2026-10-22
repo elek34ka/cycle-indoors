@@ -9,6 +9,9 @@ export interface Settings {
   useMockDevices: boolean;
   smoothPowerSeconds: number; // display smoothing for power and HR (0 = raw)
   showMiniMap: boolean;
+  /** where the rider dragged the route map, in px from the window's top-left;
+   *  null keeps it in its default corner of the workout graph */
+  miniMapPosition: { left: number; top: number } | null;
   /** keep the mini map centred on the rider rather than showing the whole route */
   miniMapFollow: boolean;
   /** try to reconnect already-paired Bluetooth devices when the app loads */
@@ -28,6 +31,7 @@ const DEFAULTS: Settings = {
   useMockDevices: false,
   smoothPowerSeconds: 3,
   showMiniMap: true,
+  miniMapPosition: null,
   miniMapFollow: true,
   autoConnectBle: true,
   showSidebar: true,

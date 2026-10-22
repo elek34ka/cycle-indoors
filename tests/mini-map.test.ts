@@ -1,7 +1,7 @@
 import { setupDom } from './dom-setup';
 const dom = setupDom();
 
-const { MiniMap } = await import('../src/ui/mini-map');
+const { MiniMap, clampToViewport } = await import('../src/ui/mini-map');
 const { Course } = await import('../src/activity/course');
 const { settings } = await import('../src/core/settings');
 const { parseGpx } = await import('../src/activity/gpx');
@@ -161,6 +161,111 @@ suite('hiding and showing the map', () => {
   map.setVisible(true);
   check('and it comes back', host.querySelector('.mini-map')?.classList.contains('hidden') === false);
   check('the preference was remembered again', settings.current.showMiniMap === true);
+});
+
+suite('the panel is kept inside the window', () => {
+  const size = { width: 268, height: 217 };
+  const viewport = { width: 1024, height: 768 };
+  const at = (left: number, top: number) => JSON.stringify(clampToViewport({ left, top }, size, viewport));
+  check('past the left edge', at(-50, 100) === JSON.stringify({ left: 0, top: 100 }), at(-50, 100));
+  check('past the right edge', at(900, 100) === JSON.stringify({ left: 756, top: 100 }), at(900, 100));
+  check('past the top edge', at(100, -20) === JSON.stringify({ left: 100, top: 0 }), at(100, -20));
+  check('past the bottom edge', at(100, 700) === JSON.stringify({ left: 100, top: 551 }), at(100, 700));
+  check('inside, it is left alone', at(300, 200) === JSON.stringify({ left: 300, top: 200 }), at(300, 200));
+  const huge = JSON.stringify(clampToViewport({ left: 40, top: 40 }, { width: 2000, height: 1000 }, viewport));
+  check('a panel bigger than the window pins to the top-left', huge === JSON.stringify({ left: 0, top: 0 }), huge);
+});
+
+// jsdom has no layout: the panel reports its inline position once floating,
+// and the top-right corner of the graph before that.
+const panel = host.querySelector<HTMLElement>('.mini-map')!;
+const head = host.querySelector<HTMLElement>('.mini-map-head')!;
+panel.getBoundingClientRect = () => {
+  const floating = panel.classList.contains('floating');
+  const left = floating ? parseFloat(panel.style.left) : 690;
+  const top = floating ? parseFloat(panel.style.top) : 60;
+  return { left, top, x: left, y: top, width: 268, height: 217, right: left + 268, bottom: top + 217, toJSON: () => ({}) } as DOMRect;
+};
+const pointer = (target: Element, type: string, clientX: number, clientY: number) =>
+  target.dispatchEvent(new dom.window.PointerEvent(type, { clientX, clientY, button: 0, bubbles: true }));
+let positionSaves = 0;
+settings.on('change', (v) => { if (v.miniMapPosition) positionSaves++; });
+
+suite('the map is dragged by its title bar', () => {
+  check('it starts in its corner, not floating', !panel.classList.contains('floating'));
+  check('with nothing remembered', settings.current.miniMapPosition === null);
+  check('the map itself is outside the title bar, so dragging it still pans the map',
+    !head.contains(host.querySelector('.mini-map-canvas')));
+  pointer(head, 'pointerdown', 700, 70);
+  pointer(head, 'pointermove', 550, 170);
+  pointer(head, 'pointermove', 400, 270);
+  check('it floats while dragged', panel.classList.contains('floating'));
+  check('it moved 300 px left and 200 px down', panel.style.left === '390px' && panel.style.top === '260px',
+    `${panel.style.left}, ${panel.style.top}`);
+  check('nothing is saved mid-drag', positionSaves === 0, String(positionSaves));
+  pointer(head, 'pointerup', 400, 270);
+  check('the position is saved once on release', positionSaves === 1, String(positionSaves));
+  check('as where it was left', JSON.stringify(settings.current.miniMapPosition) === JSON.stringify({ left: 390, top: 260 }),
+    JSON.stringify(settings.current.miniMapPosition));
+});
+
+suite('a drag stops at the edge of the window', () => {
+  pointer(head, 'pointerdown', 400, 270);
+  pointer(head, 'pointermove', 5000, 270);
+  pointer(head, 'pointerup', 5000, 270);
+  check('its right edge meets the window\'s', panel.style.left === `${1024 - 268}px`, panel.style.left);
+});
+
+suite('the title bar buttons do not move the map', () => {
+  const before = `${panel.style.left},${panel.style.top}`;
+  const hideButton = head.querySelectorAll('button')[1];
+  pointer(hideButton, 'pointerdown', 1000, 70);
+  pointer(head, 'pointermove', 600, 300);
+  pointer(head, 'pointerup', 600, 300);
+  check('it stayed put', `${panel.style.left},${panel.style.top}` === before, `${panel.style.left},${panel.style.top}`);
+  const saves = positionSaves;
+  pointer(head, 'pointerdown', 900, 300);
+  pointer(head, 'pointerup', 900, 300);
+  check('a plain click on the title does not move or save it', positionSaves === saves
+    && `${panel.style.left},${panel.style.top}` === before);
+});
+
+suite('a smaller window pulls the map back on screen', () => {
+  const realWidth = dom.window.innerWidth;
+  Object.defineProperty(dom.window, 'innerWidth', { value: 600, configurable: true });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  check('it is fully visible again', parseFloat(panel.style.left) + 268 <= 600, panel.style.left);
+  Object.defineProperty(dom.window, 'innerWidth', { value: realWidth, configurable: true });
+});
+
+suite('hiding and showing keeps the dragged position', () => {
+  pointer(head, 'pointerdown', 400, 70);
+  pointer(head, 'pointermove', 200, 470);
+  pointer(head, 'pointerup', 200, 470);
+  const before = `${panel.style.left},${panel.style.top}`;
+  map.setVisible(false);
+  map.setVisible(true);
+  check('it comes back where it was moved to', `${panel.style.left},${panel.style.top}` === before && panel.classList.contains('floating'),
+    `${before} -> ${panel.style.left},${panel.style.top}`);
+});
+
+suite('a remembered position survives a reload', () => {
+  const saved = settings.current.miniMapPosition!;
+  const otherHost = doc.createElement('div');
+  doc.body.append(otherHost);
+  new MiniMap(otherHost);
+  const reloaded = otherHost.querySelector<HTMLElement>('.mini-map')!;
+  check('the new map is floating', reloaded.classList.contains('floating'));
+  check('where it was left', reloaded.style.left === `${saved.left}px` && reloaded.style.top === `${saved.top}px`,
+    `${reloaded.style.left}, ${reloaded.style.top}`);
+  otherHost.remove();
+});
+
+suite('double-clicking the title puts the map back in its corner', () => {
+  head.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  check('it is no longer floating', !panel.classList.contains('floating'));
+  check('its inline position is cleared', panel.style.left === '' && panel.style.top === '');
+  check('and the remembered position is forgotten', settings.current.miniMapPosition === null);
 });
 
 report();

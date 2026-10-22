@@ -8,6 +8,7 @@ import { session, type SessionSnapshot } from '../session/session';
 import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
+import { blockLabel } from '../workout/targets';
 import type { Workout } from '../workout/types';
 import { clear, el, qs, setClass, setParts, setText, toast, type SubPart } from './dom';
 import { confirmDialog } from './confirm';
@@ -38,6 +39,10 @@ export function averages(avg: number | undefined, lap: number | undefined): SubP
 
 /** The parts, or the fallback text when there are none. */
 const orElse = (parts: SubPart[], fallback: string): SubPart[] | string => (parts.length ? parts : fallback);
+
+/** The FTP a workout's percentages are taken against: its own, if the file set
+ *  one, otherwise the rider's. */
+const effectiveFtp = (workout: Workout): number => workout.ftpOverride ?? settings.current.ftp;
 
 const TILES: TileSpec[] = [
   {
@@ -120,6 +125,9 @@ export class RideView {
   private tiles = new Map<string, { value: HTMLElement; sub: HTMLElement; stripe: HTMLElement; label: HTMLElement; root: HTMLElement }>();
   private segmentNodes: HTMLLIElement[] = [];
   private renderedSegmentIndex = -1;
+  private workout: Workout | undefined;
+  /** the FTP the block list's watts were written with */
+  private labelFtp: number | undefined;
   private messageNode: HTMLElement;
   private intervalBar: HTMLElement;
   private controls: HTMLElement;
@@ -166,7 +174,10 @@ export class RideView {
     session.on('workout', (w) => this.onWorkoutChanged(w));
     session.on('finished', (s) => this.onFinished(s));
     session.on('state', () => this.render(session.snapshot));
-    settings.on('change', () => this.render(session.snapshot));
+    settings.on('change', () => {
+      this.renderSegmentLabels();
+      this.render(session.snapshot);
+    });
     courseStore.on('course', (c) => this.onCourseChanged(c));
 
     this.bindKeys();
@@ -448,6 +459,8 @@ export class RideView {
   }
 
   private onWorkoutChanged(workout: Workout | undefined): void {
+    this.workout = workout;
+    this.labelFtp = undefined;
     this.graph.setWorkout(workout);
     this.renderedSegmentIndex = -1;
     clear(this.workoutMeta);
@@ -473,7 +486,7 @@ export class RideView {
     ];
     this.workoutMeta.append(...meta.filter((node): node is Node => node !== null));
 
-    const ftp = workout.ftpOverride ?? settings.current.ftp;
+    const ftp = effectiveFtp(workout);
     workout.segments.forEach((seg) => {
       const mid = seg.powerStart === undefined ? undefined : ((seg.powerStart + (seg.powerEnd ?? seg.powerStart)) / 2);
       const color = mid === undefined ? '#7a8694' : zoneForPower(mid * ftp, ftp).color;
@@ -482,12 +495,27 @@ export class RideView {
         on: { click: () => session.seek(seg.start - session.snapshot.elapsed) },
       }, [
         el('div', { class: 'bar' }),
-        el('div', { class: 'label', text: seg.label }),
+        el('div', { class: 'label' }),
         el('div', { class: 'dur', text: mmss(seg.duration) }),
       ]);
       (node.firstElementChild as HTMLElement).style.background = color;
       this.segmentList.append(node);
       this.segmentNodes.push(node);
+    });
+    this.renderSegmentLabels();
+  }
+
+  /** Writes each block's target in watts. Only when the FTP they are worked out
+   *  from has changed, and in place, so the list keeps its nodes and classes. */
+  private renderSegmentLabels(): void {
+    const workout = this.workout;
+    if (!workout) return;
+    const ftp = effectiveFtp(workout);
+    if (ftp === this.labelFtp) return;
+    this.labelFtp = ftp;
+    workout.segments.forEach((seg, i) => {
+      const label = this.segmentNodes[i]?.querySelector<HTMLElement>('.label');
+      if (label) setText(label, blockLabel(seg, ftp));
     });
   }
 
@@ -581,11 +609,16 @@ export class RideView {
     }
     const [flag, now, countdown, next] = Array.from(bar.children) as HTMLElement[];
     const free = s.effectiveMode === 'free';
+    const ftp = effectiveFtp(s.workout);
+    const label = blockLabel(s.segment, ftp);
     setText(flag, free ? 'free' : 'erg');
     setClass(flag, 'free', free);
-    setText(now, `${s.segment.kind} · ${s.segment.label}`);
+    // An unnamed FIT step is named after its intensity, which is also its kind.
+    setText(now, s.segment.name === s.segment.kind ? label : `${s.segment.kind} · ${label}`);
     setText(countdown, mmss(s.segmentRemaining));
-    setText(next, s.nextSegment ? `next: ${s.nextSegment.label} (${mmss(s.nextSegment.duration)})` : 'last block');
+    setText(next, s.nextSegment
+      ? `next: ${blockLabel(s.nextSegment, ftp)} (${mmss(s.nextSegment.duration)})`
+      : 'last block');
   }
 
   private renderSegmentList(s: SessionSnapshot): void {

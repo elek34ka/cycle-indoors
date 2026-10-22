@@ -241,9 +241,11 @@ main { min-height: 0; position: relative; }
 }
 .graph-stack.no-route { grid-template-rows: minmax(120px, 1fr) 34px; }
 
+/* 188 px: "3:59:59" at the 40 px tile value is ~161 px in a monospace face
+   (7 × ~24 px, less 1 px letter-spacing each), plus 26 px of padding and border. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
   gap: 8px;
 }
 
@@ -264,10 +266,11 @@ main { min-height: 0; position: relative; }
 }
 .tile .tile-value {
   font-family: var(--mono);
-  font-size: 34px;
+  font-size: 40px;
   line-height: 1.12;
   font-variant-numeric: tabular-nums;
   letter-spacing: -1px;
+  white-space: nowrap;
 }
 .tile .tile-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; }
 .tile .tile-sub { font-size: 13px; color: var(--text-faint); font-family: var(--mono); }
@@ -410,7 +413,14 @@ input[type="number"], input[type="text"] {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
 .mini-map.hidden, .mini-map-show.hidden { display: none; }
+/* Dragged out of its corner. z-index counts inside .mini-map-host's own
+   stacking context (5), which is already above the tiles and the sidebar and
+   below the overlays (40+). */
+.mini-map.floating { position: fixed; z-index: 30; }
 .mini-map-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -436,6 +446,7 @@ input[type="number"], input[type="text"] {
   line-height: 1;
   font-size: 15px;
 }
+.mini-map.dragging .mini-map-head { cursor: grabbing; }
 .mini-map-btn:hover { background: #242c3a; color: var(--text); }
 .mini-map-canvas { height: 184px; width: 100%; background: #dfe3e8; }
 

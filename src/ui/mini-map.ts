@@ -20,6 +20,24 @@ const DEAD_ZONE_FRACTION = 0.12;
 const DEAD_ZONE_MIN_PX = 18;
 /** Pan animation length, and the minimum gap between pans so they never stack. */
 const PAN_SECONDS = 0.9;
+/** A press on the title bar becomes a drag only after this much movement, so a
+ *  click or double-click never unpins the map from its corner. */
+const DRAG_THRESHOLD_PX = 3;
+
+export interface PanelPosition { left: number; top: number; }
+
+/** Keeps a panel of `size` fully inside `viewport`. One larger than the
+ *  viewport is pinned to the top-left, so its title bar stays reachable. */
+export function clampToViewport(
+  pos: PanelPosition,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+): PanelPosition {
+  return {
+    left: Math.max(0, Math.min(pos.left, viewport.width - size.width)),
+    top: Math.max(0, Math.min(pos.top, viewport.height - size.height)),
+  };
+}
 
 /** A small route map pinned in the corner of the ride screen. Hideable, and
  *  Leaflet is only fetched the first time it is actually shown. */
@@ -47,24 +65,24 @@ export class MiniMap {
   private raf: number | undefined;
   private lastFrame: number | undefined;
   private lastPanAt = 0;
+  /** where the rider dragged the panel; undefined while it sits in its corner */
+  private position: PanelPosition | undefined;
 
   constructor(host: HTMLElement) {
     this.titleNode = el('span', { class: 'mini-map-title', text: 'No route' });
     this.mapHost = el('div', { class: 'mini-map-canvas' });
-    this.root = el('div', { class: 'mini-map' }, [
-      el('div', { class: 'mini-map-head' }, [
-        this.titleNode,
-        el('button', {
-          class: 'mini-map-btn', text: '⤢', title: 'Show the whole route',
-          on: { click: () => this.showWholeRoute() },
-        }),
-        el('button', {
-          class: 'mini-map-btn', text: '×', title: 'Hide the map (M)',
-          on: { click: () => this.setVisible(false) },
-        }),
-      ]),
-      this.mapHost,
+    const head = el('div', { class: 'mini-map-head', title: 'Drag to move · double-click to put back' }, [
+      this.titleNode,
+      el('button', {
+        class: 'mini-map-btn', text: '⤢', title: 'Show the whole route',
+        on: { click: () => this.showWholeRoute() },
+      }),
+      el('button', {
+        class: 'mini-map-btn', text: '×', title: 'Hide the map (M)',
+        on: { click: () => this.setVisible(false) },
+      }),
     ]);
+    this.root = el('div', { class: 'mini-map' }, [head, this.mapHost]);
 
     this.showButton = el('button', {
       class: 'mini-map-show', text: 'Map', title: 'Show the route map (M)',
@@ -72,7 +90,64 @@ export class MiniMap {
     });
 
     host.append(this.root, this.showButton);
+    this.enableDrag(head);
+    const saved = settings.current.miniMapPosition;
+    if (saved) this.placeAt(saved);
     this.applyEnabled();
+  }
+
+  // ---- placement -----------------------------------------------------------
+
+  /**
+   * The title bar drags the panel anywhere in the window. The panel stays in
+   * the ride view's DOM, only switching to fixed positioning, so it is still
+   * hidden with the view. Dragging inside the map pans the map as before.
+   */
+  private enableDrag(head: HTMLElement): void {
+    let press: { x: number; y: number; dx: number; dy: number; moved: boolean } | undefined;
+    head.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || (e.target as Element | null)?.closest('button')) return;
+      const rect = this.root.getBoundingClientRect();
+      press = { x: e.clientX, y: e.clientY, dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
+      head.setPointerCapture?.(e.pointerId);
+    });
+    head.addEventListener('pointermove', (e) => {
+      if (!press) return;
+      if (!press.moved && Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_THRESHOLD_PX) return;
+      press.moved = true;
+      this.root.classList.add('dragging');
+      this.placeAt({ left: e.clientX - press.dx, top: e.clientY - press.dy });
+    });
+    const release = () => {
+      const moved = press?.moved;
+      press = undefined;
+      this.root.classList.remove('dragging');
+      // Saved once per drag: a settings patch re-renders the ride view.
+      if (moved && this.position) settings.patch({ miniMapPosition: this.position });
+    };
+    head.addEventListener('pointerup', release);
+    head.addEventListener('pointercancel', release);
+    head.addEventListener('dblclick', (e) => {
+      if (!(e.target as Element | null)?.closest('button')) this.resetPosition();
+    });
+    window.addEventListener('resize', () => { if (this.position) this.placeAt(this.position); });
+  }
+
+  private placeAt(pos: PanelPosition): void {
+    const rect = this.root.getBoundingClientRect();
+    this.position = clampToViewport(pos, rect, { width: window.innerWidth, height: window.innerHeight });
+    this.root.classList.add('floating');
+    this.root.style.left = `${this.position.left}px`;
+    this.root.style.top = `${this.position.top}px`;
+  }
+
+  /** Back to the corner of the workout graph, and forget the dragged position. */
+  resetPosition(): void {
+    this.position = undefined;
+    this.root.classList.remove('floating');
+    this.root.style.left = '';
+    this.root.style.top = '';
+    settings.patch({ miniMapPosition: null });
   }
 
   // ---- visibility ----------------------------------------------------------
@@ -104,6 +179,8 @@ export class MiniMap {
       this.stopLoop();
       return;
     }
+    // Measured while hidden it had no size, so check it fits now it has one.
+    if (this.position) this.placeAt(this.position);
     void this.ensureMap().then(() => {
       this.map?.invalidateSize();
       this.recentre();

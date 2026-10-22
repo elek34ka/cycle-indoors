@@ -52,6 +52,7 @@ try { bootApp(); } catch (err) { bootError = err as Error; }
 
 suite('boot', () => {
   check('bootApp does not throw', bootError === undefined, bootError?.stack);
+  check('older settings load with the map in its default corner', settings.current.miniMapPosition === null);
   check('seven metric tiles are rendered', doc.querySelectorAll('#metrics .tile').length === 7,
     `got ${doc.querySelectorAll('#metrics .tile').length}`);
   check('the climb tile is hidden until a route is loaded', tile(5).hidden);
@@ -415,6 +416,53 @@ suite('a free-ride workout overrides ERG mode', () => {
   check('power was still recorded', freeSnap.samples.every((x) => x.power > 0),
     JSON.stringify(freeSnap.samples.map((x) => x.power)));
   check('and the bias control is hidden', (doc.querySelectorAll<HTMLElement>('#controls .group')[2]).style.display === 'none');
+});
+
+const ftpBefore = settings.current.ftp;
+settings.patch({ ftp: 300 });
+session.loadWorkout(parseZwo(`<workout_file><name>Labels</name><workout>
+  <Warmup Duration="600" PowerLow="0.60" PowerHigh="0.80"/>
+  <SteadyState Duration="300" Power="0.50"/>
+  <IntervalsT Repeat="5" OnDuration="60" OffDuration="60" OnPower="1.10" OffPower="0.50"/>
+</workout></workout_file>`, { ftp: 300 }));
+await wait(120);
+const labelNode = () => doc.querySelector('#segment-list li .label');
+const firstLabel = labelNode()?.textContent ?? '';
+const nowText = doc.querySelector('#interval-bar .now')?.textContent ?? '';
+const nextText = doc.querySelector('#interval-bar .next')?.textContent ?? '';
+const intervalLabel = doc.querySelectorAll('#segment-list li .label').item(2)?.textContent ?? '';
+const firstNode = doc.querySelector('#segment-list li');
+settings.patch({ ftp: 200 });
+await wait(120);
+
+suite('blocks are labelled in watts and percent', () => {
+  check('a ramp in the block list shows its watt range', firstLabel === '180–240 W (60–80%)', firstLabel);
+  check('a named interval keeps its name in front', intervalLabel === '1/5 · 330 W (110%)', intervalLabel);
+  check('the interval bar shows the current block in watts', nowText.includes('180–240 W (60–80%)'), nowText);
+  check('and the next block', nextText === 'next: 150 W (50%) (5:00)', nextText);
+  check('changing FTP rewrites the labels', labelNode()?.textContent === '120–160 W (60–80%)', labelNode()?.textContent ?? '');
+  check('in place, without rebuilding the list', doc.querySelector('#segment-list li') === firstNode);
+  check('and the interval bar follows',
+    doc.querySelector('#interval-bar .now')?.textContent?.includes('120–160 W (60–80%)') ?? false,
+    doc.querySelector('#interval-bar .now')?.textContent ?? '');
+});
+settings.patch({ ftp: ftpBefore });
+
+suite('a dragged map still belongs to the ride view', () => {
+  const panel = doc.querySelector<HTMLElement>('#view-ride .mini-map')!;
+  const head = panel.querySelector<HTMLElement>('.mini-map-head')!;
+  const pointer = (type: string, clientX: number, clientY: number) =>
+    head.dispatchEvent(new dom.window.PointerEvent(type, { clientX, clientY, button: 0, bubbles: true }));
+  pointer('pointerdown', 10, 10);
+  pointer('pointermove', 60, 60);
+  pointer('pointerup', 60, 60);
+  check('the map was dragged', panel.classList.contains('floating'));
+  doc.querySelector<HTMLButtonElement>('#tabs button[data-tab="settings"]')?.click();
+  check('opening Settings hides the ride view', !doc.querySelector('#view-ride')?.classList.contains('active'));
+  check('and the map is inside it, so it is hidden too', doc.querySelector('#view-ride')?.contains(panel) ?? false);
+  doc.querySelector<HTMLButtonElement>('#tabs button[data-tab="ride"]')?.click();
+  check('back on the ride view it is still where it was dragged', panel.classList.contains('floating'));
+  head.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
 });
 
 suite('tabs and the devices panel', () => {

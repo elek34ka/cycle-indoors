@@ -107,11 +107,11 @@ export function parseZwo(xml: string, ctx: ParseContext): Workout {
         for (let r = 0; r < repeat; r++) {
           if (onDuration > 0) push({
             duration: onDuration, powerStart: onPower, powerEnd: onPower, cadence: onCadence,
-            mode: 'erg', kind: 'IntervalOn', label: `${r + 1}/${repeat} · ${Math.round(onPower * 100)}% FTP`,
+            mode: 'erg', kind: 'IntervalOn', name: `${r + 1}/${repeat}`, label: `${r + 1}/${repeat} · ${Math.round(onPower * 100)}% FTP`,
           });
           if (offDuration > 0) push({
             duration: offDuration, powerStart: offPower, powerEnd: offPower, cadence: offCadence,
-            mode: 'erg', kind: 'IntervalOff', label: `Recover · ${Math.round(offPower * 100)}% FTP`,
+            mode: 'erg', kind: 'IntervalOff', name: 'Recover', label: `Recover · ${Math.round(offPower * 100)}% FTP`,
           });
         }
         break;

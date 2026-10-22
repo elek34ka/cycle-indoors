@@ -144,6 +144,7 @@ export function parseFitWorkout(fit: FitFile, ctx: { ftp: number }, fallbackName
       mode: powerStart === undefined ? 'free' : 'erg',
       kind: INTENSITY_LABEL[step.intensity] ?? 'Step',
       label,
+      name: step.name || (INTENSITY_LABEL[step.intensity] ?? 'Step'),
     });
     cursor += duration;
     cursorStep++;

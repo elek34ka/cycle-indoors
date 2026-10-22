@@ -46,21 +46,31 @@ tablet on the same network you would need to serve the app over https.
   overrides ERG mode, so the trainer follows the gradient — or the loaded
   route's gradient — instead of a target.
 - **Live ride view** — tiles for power, target, heart rate, cadence, speed,
-  metres climbed and time. Power and heart rate show a 3-second average (the
+  metres climbed and time, their values in large figures that read from the
+  saddle. Power and heart rate show a 3-second average (the
   window is configurable) with the session and current-lap averages underneath,
   their numbers in bold so they can be read at a glance.
   A canvas workout profile coloured by power zone carries your actual power and
   heart rate over it, averaged over the same window as the tiles so the lines do
   not jitter (the exported file keeps every raw second); the current block is highlighted, with the next block and
   a countdown.  Zwift-style text messages come from the workout file.
+  Blocks are labelled in watts with the percent of FTP in brackets — a ramp as
+  `180–240 W (60–80%)`, a steady block as `225 W (75%)` — in the block list and
+  the interval bar, worked out from the workout's own FTP if the file sets one
+  and from the FTP in Settings otherwise, so changing FTP relabels them at once.
+  On the profile itself each block carries its watts (`180–240 W` on a ramp)
+  wherever it is wide enough to hold them, and hovering reads out the target at
+  that exact second.
 - **Route as a course** — a loaded `.gpx`/`.fit` route gets its elevation
   smoothed over a 30 m window, then gradient and cumulative ascent precomputed.
   The elevation profile always sits directly under the power graph, tinted by
   road gradient, showing where you are, the gradient under your wheels and how
   much you have climbed so far — live, and it keeps counting across laps of the
   route. The route map is a small panel in the corner of the graph (hideable,
-  `M`) on OpenStreetMap streets by default, with a dark basemap available. In
-  free mode, "Follow route" hands the course's gradient to the trainer instead
+  `M`) on OpenStreetMap streets by default, with a dark basemap available. Drag
+  it by its title bar anywhere in the window. It stays on screen, the position
+  is remembered across reloads, and double-clicking the title puts it back in
+  the corner. In free mode, "Follow route" hands the course's gradient to the trainer instead
   of the slider.
 - **Gradient-true speed on a route** — with a route loaded, your speed, your
   position on it and the speed/distance in the exported `.fit` come from your

@@ -1,7 +1,8 @@
 import { hhmmss } from '../core/format';
 import { zoneForRatio } from '../core/zones';
 import { settings } from '../core/settings';
-import { peakRatio, type Segment, type Workout } from '../workout/types';
+import { peakRatio, targetRatioAt, type Segment, type Workout } from '../workout/types';
+import { wattsText } from '../workout/targets';
 import type { SessionSnapshot } from '../session/session';
 import type { Sample } from '../session/metrics';
 
@@ -37,6 +38,34 @@ export function smoothSamples(samples: readonly Sample[], window: number): Trace
     }
     return { t: s.t, power: powerSum / (i - start + 1), hr: hrCount ? hrSum / hrCount : undefined };
   });
+}
+
+/** A block label is drawn only with 4 px clear on each side; a block too narrow
+ *  for it gets no label rather than a shortened, misleading one. */
+export function labelFits(textWidth: number, blockWidth: number): boolean {
+  return textWidth + 8 <= blockWidth;
+}
+
+/** The hover readout: time, the target at exactly that moment (and the range on
+ *  a ramp), then what was actually ridden there. */
+export function hoverLines(
+  seg: Segment | undefined,
+  t: number,
+  sample: Pick<Sample, 'power' | 'heartRate'> | undefined,
+  ftp: number,
+): string[] {
+  const lines = [hhmmss(t)];
+  if (seg) {
+    const ratio = targetRatioAt(seg, t);
+    if (ratio === undefined) lines.push('free ride');
+    else {
+      lines.push(`target ${Math.round(ratio * ftp)} W`);
+      const range = wattsText(seg, ftp);
+      if (range?.includes('–')) lines.push(`range ${range}`);
+    }
+  }
+  if (sample) lines.push(`actual ${sample.power} W${sample.heartRate ? ` · ${sample.heartRate} bpm` : ''}`);
+  return lines;
 }
 
 export class ProfileGraph {
@@ -292,11 +321,11 @@ export class ProfileGraph {
     ctx.lineWidth = isCurrent ? 2 : 1;
     ctx.stroke();
 
-    if (w > 34) {
+    const label = wattsText(seg, ftp);
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    if (label && labelFits(ctx.measureText(label).width, w)) {
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.textAlign = 'center';
-      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
-      const label = `${Math.round(((a + b) / 2) * ftp)}`;
       ctx.fillText(label, (x0 + x1) / 2, Math.min(yA, yB) + 11);
     }
   }
@@ -399,9 +428,7 @@ export class ProfileGraph {
 
     const seg = this.workout?.segments.find((s) => t >= s.start && t < s.start + s.duration);
     const sample = snapshot.samples.find((s) => Math.abs(s.t - t) < 1.5);
-    const lines = [hhmmss(t)];
-    if (seg) lines.push(seg.powerStart === undefined ? 'free ride' : `target ${Math.round((seg.powerStart ?? 0) * ftp)} W`);
-    if (sample) lines.push(`actual ${sample.power} W${sample.heartRate ? ` · ${sample.heartRate} bpm` : ''}`);
+    const lines = hoverLines(seg, t, sample, ftp);
 
     ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace';
     const width = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;

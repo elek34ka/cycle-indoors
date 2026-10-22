@@ -5,6 +5,7 @@ setupDom();
 const { parseZwo } = await import('../src/workout/zwo');
 const { parseGpx } = await import('../src/activity/gpx');
 const { LIBRARY } = await import('../src/workout/library');
+const { blockLabel, targetText, wattsText } = await import('../src/workout/targets');
 const { check, near, report, suite } = await import('./harness');
 
 const CTX = { ftp: 250 };
@@ -60,11 +61,38 @@ suite('zwo block types', () => {
   check('free ride is in free mode', workout.segments.find((s) => s.kind === 'FreeRide')?.mode === 'free');
   check('interval cadence targets are kept', workout.segments.find((s) => s.kind === 'IntervalOn')?.cadence === 100);
   check('rest cadence target is kept', workout.segments.find((s) => s.kind === 'IntervalOff')?.cadence === 85);
+  check('interval blocks are named by repeat, rests "Recover"',
+    JSON.stringify(workout.segments.filter((s) => s.kind.startsWith('Interval')).map((s) => s.name))
+      === JSON.stringify(['1/3', 'Recover', '2/3', 'Recover', '3/3', 'Recover']),
+    JSON.stringify(workout.segments.map((s) => s.name)));
+  check('blocks described by their target alone have no name',
+    ['Warmup', 'SteadyState', 'Ramp', 'Cooldown'].every((k) => workout.segments.find((s) => s.kind === k)?.name === undefined));
+  check('labels are unchanged by naming', workout.segments.find((s) => s.kind === 'IntervalOn')?.label === '1/3 · 120% FTP');
   const cooldown = workout.segments[workout.segments.length - 1];
   check('a cooldown always descends regardless of attribute order',
     cooldown.powerStart! > cooldown.powerEnd!, `${cooldown.powerStart} -> ${cooldown.powerEnd}`);
   check('text event is captured at the right absolute time',
     workout.textEvents.length === 1 && workout.textEvents[0].time === 310, JSON.stringify(workout.textEvents));
+});
+
+suite('block targets are written in watts and percent', () => {
+  const seg = (powerStart?: number, powerEnd?: number, name?: string) => ({
+    index: 0, start: 0, duration: 600, powerStart, powerEnd, name,
+    mode: powerStart === undefined ? 'free' as const : 'erg' as const, kind: 'Test', label: 'Free ride',
+  });
+  const eq = (title: string, got: string | undefined, want: string) => check(title, got === want, `got ${got}`);
+  eq('rising ramp', targetText(seg(0.6, 0.8), 300), '180–240 W (60–80%)');
+  eq('falling ramp keeps its direction', targetText(seg(0.8, 0.6), 300), '240–180 W (80–60%)');
+  eq('steady block', targetText(seg(0.75, 0.75), 300), '225 W (75%)');
+  eq('steady block without an end', targetText(seg(0.75), 300), '225 W (75%)');
+  eq('named interval', blockLabel(seg(1.1, 1.1, '1/5'), 300), '1/5 · 330 W (110%)');
+  eq('unnamed block is just its target', blockLabel(seg(0.6, 0.8), 300), '180–240 W (60–80%)');
+  eq('free block keeps its label', blockLabel(seg(), 300), 'Free ride');
+  check('free block has no target', targetText(seg(), 300) === undefined && wattsText(seg(), 300) === undefined);
+  eq('graph form of a ramp', wattsText(seg(0.6, 0.8), 300), '180–240 W');
+  eq('graph form of a steady block', wattsText(seg(0.75, 0.75), 300), '225 W');
+  eq('a near-flat ramp is written as steady', targetText(seg(0.75, 0.751), 300), '225 W (75%)');
+  eq('watts are rounded to the nearest watt', targetText(seg(0.55), 222), '122 W (55%)');
 });
 
 suite('zwo edge cases', () => {

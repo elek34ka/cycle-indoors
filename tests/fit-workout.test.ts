@@ -83,6 +83,8 @@ suite('parseFitWorkout expands the workout', () => {
   near('interval target is the midpoint of 103-107% FTP', workout.segments[1].powerStart!, 1.05, 0.001);
   check('interval blocks alternate', workout.segments[2].powerStart! < workout.segments[1].powerStart!);
   near('absolute-watt target converts against FTP', workout.segments[9].powerStart!, 150 / 250, 0.001);
+  check('a named step keeps its name', workout.segments[1].name === 'On' && workout.segments[0].name === 'Warm up',
+    `${workout.segments[0].name}, ${workout.segments[1].name}`);
   check('every block is in ERG mode', workout.segments.every((s) => s.mode === 'erg'));
   check('blocks are contiguous in time', workout.segments.every((s, i, all) =>
     i === 0 || Math.abs(s.start - (all[i - 1].start + all[i - 1].duration)) < 0.001));
