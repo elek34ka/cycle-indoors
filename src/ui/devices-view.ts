@@ -54,7 +54,13 @@ interface Row {
   calibrationButton: HTMLButtonElement;
 }
 
-/** Device management lives on its own Devices tab; the top bar only shows status. */
+/** What pairing shows while it runs: the chooser is open, then the link is
+ *  coming up. `null` once it is over, either way. */
+type PairStage = 'Choosing…' | 'Connecting…' | null;
+
+/** Device management lives on its own Devices tab. The top bar shows status,
+ *  and a chip with nothing connected behind it opens the same chooser as the
+ *  matching Pair button. */
 export class DevicesView {
   private panel = qs('#devices-panel');
   private chips = qs('#device-chips');
@@ -63,6 +69,8 @@ export class DevicesView {
   private rows = new Map<string, Row>();
   private simButton!: HTMLButtonElement;
   private lastChipRender = 0;
+  /** A chip's pairing in progress, by its position in the top bar. */
+  private chipStage: PairStage[] = [];
 
   constructor() {
     this.buildPanel();
@@ -88,32 +96,43 @@ export class DevicesView {
     const trainer = hub.trainer;
     const hr = hub.connected('heartRate')[0];
 
-    const spec = [
+    const spec: { kind: PairKind; label: string; state: Device['status']; pairTitle: string }[] = [
       {
+        kind: 'trainer',
         label: trainer?.status === 'connected' ? `${int(snapshot.power)} W` : 'No trainer',
         state: trainer?.status ?? 'disconnected',
+        pairTitle: 'Pair a trainer',
       },
       {
+        kind: 'heartRate',
         label: hr && snapshot.heartRate !== undefined ? `${int(snapshot.heartRate)} bpm` : 'No HR',
         state: hr?.status ?? 'disconnected',
+        pairTitle: 'Pair a heart rate strap',
       },
     ];
 
     if (this.chips.children.length !== spec.length) {
       clear(this.chips);
-      for (const _ of spec) {
-        this.chips.append(el('div', { class: 'chip', title: 'Manage devices on the Devices tab' }, [
-          el('div', { class: 'dot' }), el('span'),
-        ]));
-      }
+      spec.forEach((s, i) => {
+        this.chips.append(el('button', {
+          class: 'chip',
+          type: 'button',
+          // Web Bluetooth only opens its chooser from a click, so pair straight from here.
+          on: { click: () => void this.pair(s.kind, (stage) => { this.chipStage[i] = stage; this.renderChips(true); }) },
+        }, [el('div', { class: 'dot' }), el('span')]));
+      });
     }
 
     Array.from(this.chips.children).forEach((node, i) => {
       const s = spec[i];
-      setText(node.lastElementChild!, s.label);
+      const stage = this.chipStage[i] ?? null;
+      const pairable = stage === null && s.state !== 'connected' && s.state !== 'connecting';
+      setText(node.lastElementChild!, stage ?? s.label);
       setClass(node, 'on', s.state === 'connected');
-      setClass(node, 'pending', s.state === 'connecting');
+      setClass(node, 'pending', s.state === 'connecting' || stage !== null);
       setClass(node, 'err', s.state === 'error');
+      (node as HTMLButtonElement).disabled = !pairable;
+      (node as HTMLElement).title = pairable ? s.pairTitle : 'Manage devices on the Devices tab';
     });
   }
 
@@ -130,7 +149,15 @@ export class DevicesView {
         class: button.kind === 'trainer' ? 'btn btn-small btn-primary' : 'btn btn-small',
         text: button.label,
         title: button.title,
-        on: { click: (e) => void this.pair(button.kind, e.currentTarget as HTMLButtonElement) },
+        on: {
+          click: (e) => {
+            const node = e.currentTarget as HTMLButtonElement;
+            void this.pair(button.kind, (stage) => {
+              node.disabled = stage !== null;
+              node.textContent = stage ?? button.label;
+            });
+          },
+        },
       }));
     }
 
@@ -242,19 +269,22 @@ export class DevicesView {
     setClass(node, 'hint-warn', !available);
   }
 
-  private async pair(kind: PairKind, button: HTMLButtonElement): Promise<void> {
-    const original = button.textContent ?? '';
-    button.disabled = true;
-    button.textContent = 'Choosing…';
+  private async pair(kind: PairKind, show: (stage: PairStage) => void): Promise<void> {
+    show('Choosing…');
     try {
-      const { device } = await pairDevice(kind);
-      if (hub.find(device.id)) {
-        toast(`${device.label} is already paired.`);
+      const { device: chosen } = await pairDevice(kind);
+      const known = hub.find(chosen.id);
+      if (known?.status === 'connected' || known?.status === 'connecting') {
+        toast(`${known.label} is already paired.`);
         return;
       }
-      hub.register(device);
-      this.syncRows();
-      button.textContent = 'Connecting…';
+      // Picking a sensor that is paired but dropped reconnects it.
+      const device = known ?? chosen;
+      if (!known) {
+        hub.register(device);
+        this.syncRows();
+      }
+      show('Connecting…');
       await device.connect();
       this.retireMockFor(device);
       toast(`${device.label} connected.`);
@@ -264,8 +294,7 @@ export class DevicesView {
       if ((err as Error).name === 'NotFoundError' && /user|cancel/i.test(message)) return;
       toast(message, 'error');
     } finally {
-      button.disabled = false;
-      button.textContent = original;
+      show(null);
       this.syncRows();
     }
   }

@@ -117,7 +117,8 @@ tablet on the same network you would need to serve the app over https.
   the elevation profile. An indoor ride with no route declares no position
   fields at all and stays `indoor_cycling`.
 - **Devices** — managed from their own **Devices** tab, between Ride and
-  Settings; the top bar only shows live status chips. The simulated trainer and strap are **off by default** and
+  Settings; the top bar shows live status chips, and a **No trainer** or **No HR**
+  chip opens the same Bluetooth chooser as the matching Pair button. The simulated trainer and strap are **off by default** and
   folded away under a "Simulator" disclosure, so invented numbers can never be
   mistaken for a real sensor.
 

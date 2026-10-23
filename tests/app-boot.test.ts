@@ -550,6 +550,26 @@ suite('tabs and the devices panel', () => {
   check('returning to the ride view works', doc.querySelector('#view-ride')?.classList.contains('active'));
 });
 
+await mock.hrm.disconnect();
+const chips = () => Array.from(doc.querySelectorAll<HTMLButtonElement>('#device-chips .chip'));
+const [trainerChip, hrChip] = chips();
+const chipsBefore = { trainer: trainerChip.disabled, hr: hrChip.disabled, hrTitle: hrChip.title };
+const toastsBefore = doc.querySelectorAll('#toasts .toast-error').length;
+hrChip.click();
+await wait(0);
+
+suite('a chip with nothing behind it pairs one', () => {
+  check('the chips are buttons', chips().length === 2 && chips().every((c) => c.tagName === 'BUTTON'));
+  check('a connected trainer chip is not clickable', chipsBefore.trainer);
+  check('an empty HR chip is', !chipsBefore.hr && /Pair/.test(chipsBefore.hrTitle), chipsBefore.hrTitle);
+  const errors = Array.from(doc.querySelectorAll('#toasts .toast-error')).slice(toastsBefore);
+  check('clicking it goes through the same pairing as the Devices tab',
+    errors.some((t) => /no Web Bluetooth/.test(t.textContent ?? '')),
+    errors.map((t) => t.textContent).join(' | ') || 'no toast');
+  check('and the chip is offered again once that fails',
+    !hrChip.disabled && hrChip.textContent === 'No HR', `${hrChip.disabled} ${hrChip.textContent}`);
+});
+
 suite('no console errors along the way', () => {
   const unexpected = consoleErrors.filter((line) => !/leaflet|tile|jsdom|Not implemented/i.test(line));
   check('nothing was logged to console.error', unexpected.length === 0, unexpected.slice(0, 3).join(' | '));

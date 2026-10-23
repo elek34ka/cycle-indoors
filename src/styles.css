@@ -92,9 +92,13 @@ button { font: inherit; color: inherit; }
   border-radius: 999px;
   background: #1a212c;
   border: 1px solid var(--line);
+  font: inherit;
   font-size: 14px;
   color: var(--text-dim);
 }
+.chip:not(:disabled) { cursor: pointer; }
+.chip:not(:disabled):hover { color: var(--text); border-color: #3a4656; }
+.chip:disabled { cursor: default; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 .chip.on { color: #d6e7f7; border-color: #2c4f74; }
 .chip.on .dot { background: var(--good); box-shadow: 0 0 6px rgba(63,192,122,0.8); }
