@@ -6,15 +6,17 @@ import { keepScreenAwake } from '../core/wake-lock';
 import { session } from '../session/session';
 import { DevicesView } from './devices-view';
 import { RideView } from './ride-view';
+import { RouteSmootherView } from './route-smoother-view';
 import { buildSettingsView } from './settings-view';
 import { showSummary } from './summary';
 import { qs, toast } from './dom';
 
-type TabName = 'ride' | 'settings';
+type TabName = 'ride' | 'devices' | 'settings';
 
 export function bootApp(): void {
   new RideView((snapshot) => showSummary(snapshot));
   buildSettingsView();
+  new RouteSmootherView();
   new DevicesView();
   keepScreenAwake(navigator, document);
 

@@ -12,6 +12,7 @@
         <div class="brand">Cycle<span>Indoors</span></div>
         <nav class="tabs" id="tabs">
           <button type="button" data-tab="ride" class="active">Ride</button>
+          <button type="button" data-tab="devices">Devices</button>
           <button type="button" data-tab="settings">Settings</button>
         </nav>
         <button type="button" class="sidebar-toggle" id="toggle-sidebar"></button>
@@ -63,10 +64,16 @@
           </div>
         </section>
 
-        <section class="view view-settings" id="view-settings">
+        <section class="view view-page" id="view-devices">
+          <div class="settings-stack">
+            <div class="panel settings-panel" id="devices-panel"></div>
+          </div>
+        </section>
+
+        <section class="view view-page" id="view-settings">
           <div class="settings-stack">
             <div class="panel settings-panel" id="settings-form"></div>
-            <div class="panel settings-panel" id="devices-panel"></div>
+            <div class="panel settings-panel" id="smoother-panel"></div>
           </div>
         </section>
       </main>

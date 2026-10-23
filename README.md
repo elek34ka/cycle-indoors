@@ -17,7 +17,7 @@ live in `localStorage`; rides are kept in memory until you download them.
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # 654 checks, no browser needed
+npm test           # 1066 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -116,14 +116,14 @@ tablet on the same network you would need to serve the app over https.
   and it is tagged `virtual_activity` — so the upload draws the map and gets
   the elevation profile. An indoor ride with no route declares no position
   fields at all and stays `indoor_cycling`.
-- **Devices** — managed from the Settings page; the top bar only shows live
-  status chips. The simulated trainer and strap are **off by default** and
+- **Devices** — managed from their own **Devices** tab, between Ride and
+  Settings; the top bar only shows live status chips. The simulated trainer and strap are **off by default** and
   folded away under a "Simulator" disclosure, so invented numbers can never be
   mistaken for a real sensor.
 
 ### What phase 2 added
 
-Real sensors over Web Bluetooth, pairing from the Settings page:
+Real sensors over Web Bluetooth, pairing from the Devices tab:
 
 - **FTMS trainers** (Fitness Machine Service) — Indoor Bike Data for power,
   cadence, speed, distance and passthrough heart rate. The app also reads the
@@ -196,7 +196,7 @@ disagree. ERG and simulation cover every trainer this app has a use for.
 
 **Spin-down calibration.** A trainer that advertises spin-down support (Fitness
 Machine Feature, target-setting bit 15) and has a control point gets a
-**Calibrate** button on its row in Settings → Devices. The simulated trainer
+**Calibrate** button on its row on the Devices tab. The simulated trainer
 never offers it: there is nothing real to calibrate.
 
 - Pressing it sends `Spin Down Control` (opcode 0x13, parameter 0x01) through
@@ -226,8 +226,8 @@ Like the rest of the BLE code, this has been tested against a fake GATT stack.
 The one real trainer it has met is a Van Rysel D500, which reported success
 but held ERG at about 0.42× the target afterwards, until power-cycled.
 
-**Bluetooth log.** With **Debug tools** switched on in Settings, Settings →
-Devices shows a **Download Bluetooth log** button. Only then is anything
+**Bluetooth log.** With **Debug tools** switched on in Settings, the Devices
+tab shows a **Download Bluetooth log** button. Only then is anything
 recorded: bike data alone arrives several times a second, so with debug mode
 off nothing is logged or decoded. Switching it off also empties the log. To
 capture a problem, turn debug mode on first, then reproduce it. While it is
@@ -239,6 +239,40 @@ and carries the raw bytes plus a short decoding. The buffer holds the last
 computer unless the rider shares it, and it is gone when the page is reloaded.
 It exists so that a trainer that misbehaves can be diagnosed from what it
 actually said.
+
+**Route smoother.** Settings → Route smoother takes the jitter and the
+sudden ramps out of a route's elevation. Raw GPS altitude turns into a
+gradient that jumps every few metres, and in simulation mode the trainer's
+brake follows every jump. Load a `.gpx`, or a `.fit` ride with GPS records,
+into the panel. It is the smoother's own copy, so the route you are riding does
+not change until you ask. The panel then:
+
+- **resamples** the elevation at an even spacing (10 m by default), so every
+  window and limit means metres of road, not GPS points;
+- **removes spikes**: a reading far outside the road's height within 50 m
+  either side is replaced by that stretch's median before anything is
+  averaged;
+- **smooths** over an odd number of points with a Savitzky–Golay filter,
+  which keeps summits and valleys at their real height where a plain average
+  would flatten them;
+- **caps the gradient** to the min/max you set, and **limits how fast it may
+  change** (percentage points per 10 m). That second limit is what stops a
+  climb from kicking in all at once;
+- **keeps the start and finish heights**, so a capped climb still gets you to
+  the top. If the limits are too tight to reach the finish, it says so and by
+  how much.
+
+**Light**, **Medium** (the default) and **Strong** set all of these at once,
+and an Advanced section exposes each one. Editing a field switches the preset
+to Custom, and the values are remembered. Two charts compare the original
+(thin grey) with the result (blue): elevation, then gradient, with the
+gradient limits dashed. Hovering either chart reads both out at that point.
+A table gives ascent, descent, steepest climb and descent, largest gradient
+change and the start/finish shift, before and after. **Download smoothed
+.gpx** writes every original point at its original position with the
+smoothed height, and no times or sensor data, because it is a course and not a
+ride. **Ride this route** makes it the ride's course straight away. It is
+unavailable while a ride is running or paused.
 
 ### What is deliberately not here yet
 
@@ -253,14 +287,15 @@ src/
   core/        event bus, formatting, power/HR zones, settings store
   workout/     workout model, .zwo parser, .fit workout parser, sample library
   fit/         FIT binary layer: CRC, profile tables, decoder, encoder
-  activity/    track model, course model, GPX parser, FIT activity reader/writer
+  activity/    track model, course model, GPX parser and writer, FIT activity
+               reader/writer, elevation smoothing
   session/     the ride engine (state machine, recorder, trainer commands), metrics,
                spin-down calibration state
   devices/     Device/TrainerControl interfaces, hub, physics, simulated rider
   devices/ble/ Web Bluetooth: UUIDs, characteristic parsers, revolution
                trackers, GATT transport with reconnect, pairing
   ui/          app shell, ride view, power graph, elevation graph, mini map,
-               summary, settings + devices
+               summary, settings + devices, route smoother
 tests/         node-run suites (FIT round-trip, parsers, full app boot in jsdom)
 samples/       a workout and a route to try the loaders on
 ```
@@ -301,6 +336,29 @@ Two seams matter for the phases ahead:
   and to leave the axis and hover text at their own sizes. That mapping is one pair of
   pure functions used by both the drawing code and the hover cursor, so the two
   cannot drift apart again.
+- **smoothing** — the route smoother's pipeline on known profiles: a single
+  40 m altitude spike and a 30 m run of them leave a flat road within 0.5 m,
+  while a real 10% climb and ±1 m of noise are left alone. Savitzky–Golay
+  passes lines and parabolas through exactly, ends included, and keeps a
+  summit within 1 m where a moving average loses more. A 30% wall stays under
+  a 15% cap, 0% to 10% takes at least 100 m at 1 point per 10 m, a clipped
+  300 m climb still finishes at its height, and a 200 m climb in 2 km at 5%
+  reports a 95 m shortfall. Then 200 random noisy routes × three presets are
+  checked segment by segment against both limits and both anchors. The GPX
+  export of the sample route, of a `.fit` ride and of an awkwardly named
+  route is loaded back with the app's own parser: same points, same
+  coordinates, same distance, smoothed heights within 0.1 m, no times or
+  sensor data. Older settings get Medium.
+- **route-smoother** — the Settings panel in jsdom: a route dropped on it
+  fills the table without touching the ride's course, and a workout or an
+  elevation-less GPX is refused while the previous route stays. Presets fill
+  the fields, an edit switches to Custom, 8 becomes 9, and min ≥ max or an
+  out-of-range value is refused and put back. The preview obeys a custom cap,
+  and hovering either chart reads out both profiles at the same distance. The
+  download is named `…-smoothed.gpx`, is `application/gpx+xml` and carries
+  the smoothed heights. Ride this route is disabled while running or paused,
+  even against a forced click. After Finish it swaps in a course that stays
+  within the cap.
 - **ble** — every characteristic parser against hand-built packets: the
   inverted "More Data" bit, 24-bit distance fields, signed power, the
   not-available sentinel, truncated packets, a Cycling Power packet with every

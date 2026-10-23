@@ -54,7 +54,7 @@ interface Row {
   calibrationButton: HTMLButtonElement;
 }
 
-/** Device management lives on the Settings page; the top bar only shows status. */
+/** Device management lives on its own Devices tab; the top bar only shows status. */
 export class DevicesView {
   private panel = qs('#devices-panel');
   private chips = qs('#device-chips');
@@ -102,7 +102,7 @@ export class DevicesView {
     if (this.chips.children.length !== spec.length) {
       clear(this.chips);
       for (const _ of spec) {
-        this.chips.append(el('div', { class: 'chip', title: 'Manage devices on the Settings page' }, [
+        this.chips.append(el('div', { class: 'chip', title: 'Manage devices on the Devices tab' }, [
           el('div', { class: 'dot' }), el('span'),
         ]));
       }

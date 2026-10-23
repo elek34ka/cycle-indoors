@@ -1,4 +1,5 @@
 import { Emitter } from './pubsub';
+import { PRESETS, type SmoothingParams, type SmoothingPreset } from '../activity/smoothing';
 
 export interface Settings {
   ftp: number;            // W
@@ -20,6 +21,8 @@ export interface Settings {
   showSidebar: boolean;
   /** shows diagnostic tools, such as the Bluetooth log download */
   debugMode: boolean;
+  /** the Route smoother's last parameters, and which preset they came from */
+  routeSmoothing: SmoothingParams & { preset: SmoothingPreset };
 }
 
 const DEFAULTS: Settings = {
@@ -36,6 +39,7 @@ const DEFAULTS: Settings = {
   autoConnectBle: true,
   showSidebar: true,
   debugMode: false,
+  routeSmoothing: { ...PRESETS.medium, preset: 'medium' },
 };
 
 const KEY = 'cycle-indoors.settings.v1';

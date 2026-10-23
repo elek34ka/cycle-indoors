@@ -502,7 +502,9 @@ suite('a dragged map still belongs to the ride view', () => {
 });
 
 suite('tabs and the devices panel', () => {
-  check('there are exactly two tabs', doc.querySelectorAll('#tabs button').length === 2);
+  const tabs = [...doc.querySelectorAll<HTMLButtonElement>('#tabs button')];
+  check('there are three tabs: Ride, Devices, Settings',
+    tabs.map((b) => b.textContent).join(',') === 'Ride,Devices,Settings', tabs.map((b) => b.textContent).join(','));
   doc.querySelector<HTMLButtonElement>('#tabs button[data-tab="settings"]')?.click();
   check('the settings view became active', doc.querySelector('#view-settings')?.classList.contains('active'));
   check('the ride view is hidden', !doc.querySelector('#view-ride')?.classList.contains('active'));
@@ -512,7 +514,18 @@ suite('tabs and the devices panel', () => {
   check('the settings form rendered its toggles',
     doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 5,
     `got ${doc.querySelectorAll('#settings-form input[type="checkbox"]').length}`);
-  check('devices are managed from the settings page',
+  check('the devices panel is not on the settings page',
+    !doc.querySelector('#view-settings')?.contains(doc.querySelector('#devices-panel')));
+
+  doc.querySelector<HTMLButtonElement>('#tabs button[data-tab="devices"]')?.click();
+  check('the devices view became active', doc.querySelector('#view-devices')?.classList.contains('active'));
+  check('the settings view is hidden', !doc.querySelector('#view-settings')?.classList.contains('active'));
+  check('the devices tab is marked active',
+    doc.querySelector('#tabs button[data-tab="devices"]')?.classList.contains('active'));
+  check('the devices panel lives on the devices page',
+    doc.querySelector('#view-devices')?.contains(doc.querySelector('#devices-panel')) ?? false);
+  check('the panel toggle is not offered on the Devices tab', doc.querySelector('#toggle-sidebar')?.classList.contains('hidden'));
+  check('devices are managed from the devices page',
     (doc.querySelectorAll('#devices-panel .device-row').length ?? 0) === 2,
     String(doc.querySelectorAll('#devices-panel .device-row').length));
   check('there is a pairing button for every sensor kind',

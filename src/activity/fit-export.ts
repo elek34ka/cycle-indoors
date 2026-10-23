@@ -222,8 +222,8 @@ export function buildActivityFit(opts: ExportOptions): Uint8Array {
   return enc.finish();
 }
 
-export function downloadBytes(bytes: Uint8Array, filename: string): void {
-  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/octet-stream' });
+export function downloadBytes(bytes: Uint8Array, filename: string, type = 'application/octet-stream'): void {
+  const blob = new Blob([bytes as unknown as BlobPart], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
