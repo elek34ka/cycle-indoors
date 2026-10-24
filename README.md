@@ -17,7 +17,7 @@ live in `localStorage`; rides are kept in memory until you download them.
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # 1066 checks, no browser needed
+npm test           # 1123 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -268,6 +268,15 @@ and an Advanced section exposes each one. Editing a field switches the preset
 to Custom, and the values are remembered. Two charts compare the original
 (thin grey) with the result (blue): elevation, then gradient, with the
 gradient limits dashed. Hovering either chart reads both out at that point.
+Under them a map shows where the route goes. The line is coloured by the
+smoothed gradient, on the same scale as the elevation chart's fill, with the
+start in green and the finish in red. Hovering a chart puts a marker on the
+map at that distance, and hovering the line on the map moves the charts'
+cursor and the readout to the nearest point on the route. A new route is
+framed whole, and changing the smoothing only recolours the line, leaving the
+map where you panned and zoomed it. Leaflet and the map tiles are fetched only
+once a route is loaded. Offline, the map says it is unavailable and
+everything else carries on.
 A table gives ascent, descent, steepest climb and descent, largest gradient
 change and the start/finish shift, before and after. **Download smoothed
 .gpx** writes every original point at its original position with the
@@ -289,7 +298,8 @@ src/
   workout/     workout model, .zwo parser, .fit workout parser, sample library
   fit/         FIT binary layer: CRC, profile tables, decoder, encoder
   activity/    track model, course model, GPX parser and writer, FIT activity
-               reader/writer, elevation smoothing
+               reader/writer, elevation smoothing, route geometry for the
+               smoother's map
   session/     the ride engine (state machine, recorder, trainer commands), metrics,
                spin-down calibration state
   devices/     Device/TrainerControl interfaces, hub, physics, simulated rider
@@ -359,7 +369,21 @@ Two seams matter for the phases ahead:
   download is named `…-smoothed.gpx`, is `application/gpx+xml` and carries
   the smoothed heights. Ride this route is disabled while running or paused,
   even against a forced click. After Finish it swaps in a course that stays
-  within the cap.
+  within the cap. Before a route there is no map and Leaflet is not loaded.
+  After one, the map frames the whole route, keeps its view through a refused
+  file and a preset change while recolouring the line, puts a marker where a
+  chart is hovered, and fills the readout when its line is hovered.
+- **route-geometry** — the pure helpers behind the smoother's map: a position
+  at a distance clamps and interpolates, the nearest distance to a point maps
+  50 places on the sample route back to themselves within 1 m and a point
+  20 m off a road to its foot, and the gradient-coloured runs on a flat, climb,
+  flat road come out as exactly three that join end to end, with no point lost
+  on the sample route.
+- **route-preview-map** — the smoother's map component through Leaflet under
+  jsdom: no Leaflet until a route is set, the route framed whole, a recolour
+  that keeps a hand-set view, the hover marker, a line hover near 5 km
+  reporting 5 km, the tile-error notice, and a failed Leaflet load that shows
+  "Map unavailable" without anything throwing.
 - **ble** — every characteristic parser against hand-built packets: the
   inverted "More Data" bit, 24-bit distance fields, signed power, the
   not-available sentinel, truncated packets, a Cycling Power packet with every

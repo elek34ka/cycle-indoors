@@ -3,9 +3,10 @@ import { gradientColor } from '../activity/course';
 import { downloadBytes } from '../activity/fit-export';
 import { parseGpx } from '../activity/gpx';
 import { buildGpx, smoothedTrackPoints } from '../activity/gpx-export';
+import { gradientRuns, positionAt, type LatLon } from '../activity/route-geometry';
 import {
-  PARAM_SPECS, PRESETS, PRESET_LABELS, gradientAt, normaliseParams, routeProblem, smoothProfile, validateParams,
-  valueAt, type ProfileStats, type SmoothedProfile, type SmoothingParams, type SmoothingPreset,
+  PARAM_SPECS, PRESETS, PRESET_LABELS, gradientAt, normaliseParams, routeDistances, routeProblem, smoothProfile,
+  validateParams, valueAt, type ProfileStats, type SmoothedProfile, type SmoothingParams, type SmoothingPreset,
 } from '../activity/smoothing';
 import type { ActivityTrack } from '../activity/types';
 import { settings } from '../core/settings';
@@ -13,6 +14,7 @@ import { loadFile } from '../loaders';
 import { session } from '../session/session';
 import { distanceForX, xForDistance, type Plot } from './elevation-graph';
 import { clear, el, qs, setText, toast } from './dom';
+import { RoutePreviewMap } from './route-preview-map';
 
 type Stored = SmoothingParams & { preset: SmoothingPreset };
 
@@ -92,6 +94,11 @@ export class RouteSmootherView {
   private params: Stored = { ...settings.current.routeSmoothing };
   private hoverDistance: number | undefined;
   private pending = 0;
+  /** the track's located points and their distances, as the map and the GPX use them */
+  private points: LatLon[] = [];
+  private distances: number[] = [];
+  /** the next recompute is for a newly loaded route, so the map frames it */
+  private newRoute = false;
 
   private readonly presetSelect: HTMLSelectElement;
   private readonly inputs = new Map<keyof SmoothingParams, HTMLInputElement>();
@@ -105,6 +112,7 @@ export class RouteSmootherView {
   private readonly rideHint: HTMLElement;
   private readonly elevationChart: ChartCanvas;
   private readonly gradientChart: ChartCanvas;
+  private readonly map: RoutePreviewMap;
 
   constructor(host: HTMLElement = qs('#smoother-panel')) {
     const picker = el('input', { type: 'file', attrs: { accept: '.gpx,.fit' } }) as HTMLInputElement;
@@ -160,6 +168,7 @@ export class RouteSmootherView {
     const gradientCanvas = el('canvas', { id: 'smoother-gradient' }) as HTMLCanvasElement;
     const elevationBox = el('div', { class: 'smoother-chart' }, [elevationCanvas]);
     const gradientBox = el('div', { class: 'smoother-chart' }, [gradientCanvas]);
+    const mapBox = el('div', { class: 'smoother-map', id: 'smoother-map' });
 
     this.downloadButton = el('button', {
       class: 'btn', id: 'smoother-download', text: 'Download smoothed .gpx', disabled: true,
@@ -181,6 +190,8 @@ export class RouteSmootherView {
       elevationBox,
       el('div', { class: 'smoother-chart-title', text: 'Gradient' }),
       gradientBox,
+      el('div', { class: 'smoother-chart-title', text: 'Map' }),
+      mapBox,
       this.readout,
       this.warning,
       this.table,
@@ -223,6 +234,10 @@ export class RouteSmootherView {
       chart.canvas.addEventListener('pointerleave', () => this.setHover(undefined));
     }
 
+    // Built now, but Leaflet is only fetched once a route is loaded.
+    this.map = new RoutePreviewMap(mapBox);
+    this.map.onHover = (distance) => this.setHover(distance);
+
     this.showParams();
     session.on('state', () => this.refreshButtons());
     // "Reset to defaults" on the rider profile resets these too.
@@ -236,6 +251,8 @@ export class RouteSmootherView {
   }
 
   get current(): SmoothedProfile | undefined { return this.profile; }
+
+  get previewMap(): RoutePreviewMap { return this.map; }
 
   async load(file: File): Promise<void> {
     let track: ActivityTrack | undefined;
@@ -255,6 +272,9 @@ export class RouteSmootherView {
       return;
     }
     this.track = track;
+    this.points = track.points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    this.distances = routeDistances(this.points);
+    this.newRoute = true;
     this.fileBase = file.name.replace(/\.[^.]+$/, '') || 'route';
     this.hoverDistance = undefined;
     this.recompute();
@@ -317,6 +337,13 @@ export class RouteSmootherView {
     this.renderReadout();
     this.refreshButtons();
     this.draw();
+    const runs = gradientRuns(this.points, this.distances, this.profile);
+    if (this.newRoute) {
+      this.newRoute = false;
+      void this.map.setRoute(this.points, this.distances, runs);
+    } else {
+      this.map.setColours(runs);
+    }
   }
 
   private total(): number {
@@ -359,6 +386,7 @@ export class RouteSmootherView {
 
   private setHover(distance: number | undefined): void {
     this.hoverDistance = distance;
+    this.map.setHover(distance === undefined ? undefined : positionAt(this.points, this.distances, distance));
     this.renderReadout();
     this.draw();
   }

@@ -734,6 +734,35 @@ input[type="number"], input[type="text"] {
   overflow: hidden;
 }
 .smoother-chart canvas { display: block; touch-action: none; }
+.smoother-map {
+  position: relative;
+  height: 260px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.smoother-map-canvas { height: 100%; width: 100%; background: #dfe3e8; }
+.smoother-map-notice {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000; /* above Leaflet's panes and controls */
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--warn);
+  font-size: 13px;
+}
+.smoother-map-notice[hidden] { display: none; }
+.smoother-map-unavailable {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: 14px;
+}
 .smoother-readout { font-family: var(--mono); font-size: 13px; color: var(--text-dim); min-height: 1.4em; }
 .smoother-table {
   display: grid;

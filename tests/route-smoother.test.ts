@@ -7,7 +7,8 @@ console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).jo
 
 const { check, near, report, suite } = await import('./harness');
 const { RouteSmootherView } = await import('../src/ui/route-smoother-view');
-const { PRESETS, smoothProfile, valueAt } = await import('../src/activity/smoothing');
+const { PRESETS, routeDistances, smoothProfile, valueAt } = await import('../src/activity/smoothing');
+const { positionAt } = await import('../src/activity/route-geometry');
 const { courseStore } = await import('../src/activity/course-store');
 const { parseGpx } = await import('../src/activity/gpx');
 const { settings } = await import('../src/core/settings');
@@ -57,9 +58,18 @@ suite('before a route is loaded', () => {
     && input('maxGradient').value === String(PRESETS.medium.maxGradient));
   check('Download is disabled', download().disabled);
   check('Ride this route is disabled', ride().disabled);
+  check('the map block is hidden with the rest of the preview',
+    doc.querySelector<HTMLElement>('#smoother-map')?.closest<HTMLElement>('.smoother-body')?.hidden === true);
+  check('and Leaflet has not been loaded', view.previewMap.viewState === undefined);
 });
 
 await drop('sample-hilly-loop.gpx', sampleXml);
+await wait(150); // Leaflet is fetched on demand, now that there is a route
+
+const samplePoints = sampleTrack.points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+const sampleDistances = routeDistances(samplePoints);
+/** The colours of the map's lines, in drawing order. */
+const mapColours = () => [...doc.querySelectorAll('#smoother-map path')].map((p) => p.getAttribute('stroke')).join(',');
 
 suite('loading a route', () => {
   check('the route is previewed', view.current !== undefined);
@@ -73,11 +83,28 @@ suite('loading a route', () => {
   check('the ride\'s own course is untouched', courseStore.current === rideRoute && courseStore.current?.name === 'Ride route');
 });
 
+suite('the map', () => {
+  check('is shown', doc.querySelector<HTMLElement>('#smoother-map')?.closest<HTMLElement>('.smoother-body')?.hidden === false);
+  const state = view.previewMap.viewState;
+  check('has loaded', state !== undefined);
+  if (!state) return;
+  const lats = samplePoints.map((p) => p.lat);
+  const lons = samplePoints.map((p) => p.lon);
+  const { south, west, north, east } = state.bounds;
+  check('frames the whole route', Math.min(...lats) >= south && Math.max(...lats) <= north
+    && Math.min(...lons) >= west && Math.max(...lons) <= east, JSON.stringify(state.bounds));
+});
+
+const loadedView = view.previewMap.viewState!;
+const loadedColours = mapColours();
 const before = view.current;
 await drop('workout.zwo', '<workout_file><name>W</name><workout><SteadyState Duration="60" Power="0.5"/></workout></workout_file>');
 suite('refusing what is not a route', () => {
   check('a workout is refused as not a route', lastToast().includes('is not a route'), lastToast());
   check('the previous route stays', view.current === before);
+  const state = view.previewMap.viewState!;
+  check('and so does the map\'s view', state.lat === loadedView.lat && state.lon === loadedView.lon
+    && state.zoom === loadedView.zoom);
 });
 
 await drop('flat.gpx', '<gpx><trk><trkseg><trkpt lat="50" lon="19"></trkpt><trkpt lat="50.01" lon="19"></trkpt></trkseg></trk></gpx>');
@@ -121,6 +148,10 @@ suite('the preview follows the parameters', () => {
   check('the preview uses the custom window', p.params.window === 9);
   check('and the custom cap', p.smoothedGradient.every((g) => g <= 9 + 1e-9), `max ${Math.max(...p.smoothedGradient)}`);
   check('the table follows', cell('Largest change', 'smoothed') === `${p.stats.smoothed.maxChange.toFixed(1)} % / 10 m`);
+  const state = view.previewMap.viewState!;
+  check('the map keeps its view', state.lat === loadedView.lat && state.lon === loadedView.lon
+    && state.zoom === loadedView.zoom);
+  check('but is recoloured', mapColours() !== loadedColours);
 });
 
 suite('hovering the charts', () => {
@@ -137,6 +168,29 @@ suite('hovering the charts', () => {
   check('the elevation chart reads the same place', readout().startsWith(`${(d / 1000).toFixed(2)} km`), readout());
   canvas.dispatchEvent(new dom.window.MouseEvent('pointerleave', { bubbles: true }));
   check('leaving clears it', readout().startsWith('Hover a chart'), readout());
+});
+
+suite('hovering links the charts and the map', () => {
+  const p = view.current!;
+  const readout = () => doc.querySelector('#smoother-readout')?.textContent ?? '';
+  const elevation = doc.querySelector<HTMLCanvasElement>('#smoother-elevation')!;
+  elevation.dispatchEvent(new dom.window.MouseEvent('pointermove', { clientX: 150, clientY: 60, bubbles: true }));
+  const d = ((150 - 52) / 254) * p.distances[p.distances.length - 1];
+  const expected = positionAt(samplePoints, sampleDistances, d);
+  const marker = view.previewMap.viewState!.hover;
+  check('a chart hover puts a marker on the map', marker !== undefined);
+  near('at that distance\'s latitude', marker?.lat ?? NaN, expected.lat, 1e-7);
+  near('and longitude', marker?.lon ?? NaN, expected.lon, 1e-7);
+  elevation.dispatchEvent(new dom.window.MouseEvent('pointerleave', { bubbles: true }));
+  check('leaving the chart removes it', view.previewMap.viewState!.hover === undefined);
+
+  const at = positionAt(samplePoints, sampleDistances, 4200);
+  view.previewMap.hoverAt(at.lat, at.lon);
+  check('hovering the map\'s line fills the readout at that distance', readout().startsWith('4.20 km'), readout());
+  check('and marks it on the map', view.previewMap.viewState!.hover !== undefined);
+  view.previewMap.hoverAt(undefined);
+  check('leaving the line restores the prompt', readout().startsWith('Hover a chart'), readout());
+  check('and removes the marker', view.previewMap.viewState!.hover === undefined);
 });
 
 let downloaded: Blob | undefined;
