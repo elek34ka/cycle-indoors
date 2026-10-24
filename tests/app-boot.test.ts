@@ -429,7 +429,7 @@ suite('the recorded ride exports as a valid FIT file', () => {
 });
 
 // --- a workout that is nothing but free riding ------------------------------
-const freeEntry = LIBRARY.find((e) => e.id === 'free-ride-3h')!;
+const freeEntry = LIBRARY.find((e) => e.id === 'free-ride-1h')!;
 session.loadWorkout(parseZwo(freeEntry.zwo, { ftp: settings.current.ftp }));
 session.setMode('erg'); // deliberately: the workout should override this
 session.start();
@@ -440,7 +440,7 @@ session.finish();
 hideSummary();
 
 suite('a free-ride workout overrides ERG mode', () => {
-  near('it is three hours long', freeSnap.workout!.duration, 3 * 3600, 0.01);
+  near('it is one hour long', freeSnap.workout!.duration, 3600, 0.01);
   check('the mode toggle still says ERG', freeSnap.mode === 'erg');
   check('but the block is ridden free', freeSnap.effectiveMode === 'free', freeSnap.effectiveMode);
   check('there is no power target', freeSnap.targetPower === 0, String(freeSnap.targetPower));

@@ -78,20 +78,12 @@ export const LIBRARY: LibraryEntry[] = [
     <Cooldown Duration="300" PowerLow="0.60" PowerHigh="0.40"/>`, 'Long aerobic ride with short tempo lifts.'),
   },
   {
-    id: 'free-ride-3h',
-    title: 'Free ride 3 h',
-    summary: '3:00 · no targets, hourly blocks',
-    zwo: wrap('Free ride 3 h', freeRide(3),
-      'Three hours of free riding with no power targets. Use free mode with a '
+    id: 'free-ride-1h',
+    title: 'Free ride 1 h',
+    summary: '1:00 · no targets',
+    zwo: wrap('Free ride 1 h', freeRide(1),
+      'An hour of free riding with no power targets. Use free mode with a '
       + 'gradient, or load a route and let its gradient drive the trainer.'),
-  },
-  {
-    id: 'free-ride-4h',
-    title: 'Free ride 4 h',
-    summary: '4:00 · no targets, hourly blocks',
-    zwo: wrap('Free ride 4 h', freeRide(4),
-      'Four hours of free riding with no power targets. Long enough that a '
-      + 'route and the map earn their keep.'),
   },
   {
     id: 'ramp-test',

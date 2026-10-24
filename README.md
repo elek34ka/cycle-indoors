@@ -38,11 +38,11 @@ tablet on the same network you would need to serve the app over https.
 ### What phase 1 gives you
 
 - **Workout loading** — `.zwo` (Zwift) and `.fit` workout files, by file picker
-  or drag and drop, plus a built-in library of five workouts. Both parsers
+  or drag and drop, plus a built-in library of six workouts. Both parsers
   flatten repeats into a single timeline, so `IntervalsT Repeat="5"` becomes ten
   blocks and a FIT `repeatUntilStepsCmplt` step is expanded the same way. The
-  library includes 3-hour and 4-hour pure free rides: no power targets at all,
-  split into hour blocks so the ride auto-laps hourly. A free-ride block
+  library includes a 1-hour pure free ride with no power targets at all. A
+  free-ride block
   overrides ERG mode, so the trainer follows the gradient — or the loaded
   route's gradient — instead of a target.
 - **Live ride view** — tiles for power, target, heart rate, cadence, speed,

@@ -22,7 +22,7 @@ suite('every library workout parses', () => {
 });
 
 suite('the free-ride workouts have no targets at all', () => {
-  for (const [id, hours] of [['free-ride-3h', 3], ['free-ride-4h', 4]] as const) {
+  for (const [id, hours] of [['free-ride-1h', 1]] as const) {
     const entry = LIBRARY.find((e) => e.id === id)!;
     const workout = parseZwo(entry.zwo, CTX);
     near(`${id}: ${hours} hours long`, workout.duration, hours * 3600, 0.01);
