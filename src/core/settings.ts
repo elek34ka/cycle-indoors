@@ -1,5 +1,5 @@
 import { Emitter } from './pubsub';
-import { PRESETS, type SmoothingParams, type SmoothingPreset } from '../activity/smoothing';
+import { PRESETS, matchPreset, type SmoothingParams, type SmoothingPreset } from '../activity/smoothing';
 
 export interface Settings {
   ftp: number;            // W
@@ -44,6 +44,14 @@ const DEFAULTS: Settings = {
 
 const KEY = 'cycle-indoors.settings.v1';
 
+/** Saved settings over the defaults. The smoother's preset name is worked out
+ *  again from its values, because the presets' values have moved since some
+ *  settings were saved; the values themselves are kept as they were. */
+export function restoreSettings(saved: Partial<Settings>): Settings {
+  const value = { ...DEFAULTS, ...saved };
+  return { ...value, routeSmoothing: { ...value.routeSmoothing, preset: matchPreset(value.routeSmoothing) } };
+}
+
 class SettingsStore extends Emitter<{ change: Settings }> {
   private value: Settings;
 
@@ -52,7 +60,7 @@ class SettingsStore extends Emitter<{ change: Settings }> {
     this.value = { ...DEFAULTS };
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) this.value = { ...DEFAULTS, ...JSON.parse(raw) };
+      if (raw) this.value = restoreSettings(JSON.parse(raw));
     } catch { /* first run, private mode, or cleared storage */ }
   }
 

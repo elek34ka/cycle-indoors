@@ -12,6 +12,14 @@ import { SPIN_DOWN_IDLE, isActive, spinDownReduce, type SpinDownEvent, type Spin
 
 export type SessionState = 'idle' | 'running' | 'paused' | 'finished';
 export type RideMode = 'erg' | 'free';
+/** What the trainer is told to hold: a power target (ERG) or a gradient (simulation). */
+export type ControlMode = 'power' | 'grade';
+/** In free riding, whether the rider holds a gradient or a power of their choosing. */
+export type FreeTarget = 'grade' | 'power';
+
+/** Typed power targets, watts. Below 25 W a trainer cannot hold anything useful. */
+export const MIN_TARGET_WATTS = 25;
+export const MAX_TARGET_WATTS = 2000;
 
 export interface Lap { index: number; startTime: number; endTime: number; label: string; }
 
@@ -28,7 +36,15 @@ export interface SessionSnapshot {
   segmentElapsed: number;
   segmentRemaining: number;
   nextSegment?: Segment;
+  /** the power target in force: an override, the free watts, or the workout's × bias; 0 when a gradient is held */
   targetPower: number;
+  /** what is sent to the trainer. Unlike effectiveMode, free riding at a chosen power is 'power'. */
+  controlMode: ControlMode;
+  /** watts the rider typed for the current ERG block, in force until the block ends */
+  blockOverride?: number;
+  freeTarget: FreeTarget;
+  /** the free-riding power target, once the rider has chosen Watts */
+  freePower?: number;
   targetCadence?: number;
   live: Telemetry;
   /** display average over settings.smoothPowerSeconds (3 s by default) */
@@ -113,6 +129,9 @@ interface RunningTotals { power: number; powerCount: number; hr: number; hrCount
 
 const emptyTotals = (): RunningTotals => ({ power: 0, powerCount: 0, hr: 0, hrCount: 0 });
 
+const validWatts = (watts: number): boolean =>
+  Number.isFinite(watts) && watts >= MIN_TARGET_WATTS && watts <= MAX_TARGET_WATTS;
+
 export class Session extends Emitter<SessionEvents> {
   private state: SessionState = 'idle';
   private mode: RideMode = 'erg';
@@ -124,6 +143,10 @@ export class Session extends Emitter<SessionEvents> {
   private ergBias = 1;
   private grade = 0;
   private follow = false;
+  /** a typed target for one ERG block, identified by its segment index */
+  private override: { segmentIndex: number; watts: number } | undefined;
+  private freeTarget: FreeTarget = 'grade';
+  private freePower: number | undefined;
   private samples: Sample[] = [];
   private laps: Lap[] = [];
   private lapStart = 0;
@@ -158,7 +181,14 @@ export class Session extends Emitter<SessionEvents> {
     super();
     this.devices.on('telemetry', (t) => { this.live = t; });
     // A new or removed route restarts the virtual speed from what the sensors say.
-    courseStore.on('course', () => { this.virtualSpeed = undefined; });
+    courseStore.on('course', (course) => {
+      this.virtualSpeed = undefined;
+      // Riding a route means riding its hills, so a new route is followed
+      // until the rider says otherwise.
+      this.follow = course !== undefined;
+      this.lastGradeSent = undefined;
+      if (this.state === 'running') this.pushTrainerCommand(true);
+    });
     this.loop();
   }
 
@@ -187,6 +217,10 @@ export class Session extends Emitter<SessionEvents> {
       segmentRemaining: segment ? Math.max(0, segment.start + segment.duration - this.elapsed) : 0,
       nextSegment: next,
       targetPower: this.targetPower(),
+      controlMode: this.controlMode(effectiveMode),
+      blockOverride: this.activeOverride()?.watts,
+      freeTarget: this.freeTarget,
+      freePower: this.freePower,
       targetCadence: segment?.cadence,
       live: this.live,
       smoothedPower: this.smoothed(this.powerBuffer, this.live.power),
@@ -211,15 +245,36 @@ export class Session extends Emitter<SessionEvents> {
     };
   }
 
-  targetPower(): number {
-    if (!this.workout || this.mode === 'free') return 0;
-    // The workout is done; the brake follows the gradient now, not a target.
-    if (this.elapsed >= this.workout.duration) return 0;
+  /** The ERG segment in force now, if any: a workout running, not complete,
+   *  not switched to Free, and the current block not a FreeRide. */
+  private ergSegment(): Segment | undefined {
+    if (!this.workout || this.mode === 'free') return undefined;
+    if (this.elapsed >= this.workout.duration) return undefined;
     const segment = segmentAt(this.workout, this.elapsed);
-    if (!segment || segment.mode === 'free') return 0;
+    return segment && segment.mode !== 'free' ? segment : undefined;
+  }
+
+  /** The block override, only while its own block is the ERG block in force. */
+  private activeOverride(): { segmentIndex: number; watts: number } | undefined {
+    const segment = this.ergSegment();
+    return segment && this.override?.segmentIndex === segment.index ? this.override : undefined;
+  }
+
+  private controlMode(effectiveMode: RideMode): ControlMode {
+    return effectiveMode === 'erg' || this.freeTarget === 'power' ? 'power' : 'grade';
+  }
+
+  targetPower(): number {
+    const segment = this.ergSegment();
+    if (!segment) {
+      // Free riding: a gradient, unless the rider chose to hold a power.
+      return this.freeTarget === 'power' ? this.freePower ?? 0 : 0;
+    }
+    const override = this.activeOverride();
+    if (override) return override.watts;
     const ratio = targetRatioAt(segment, this.elapsed);
     if (ratio === undefined) return 0;
-    const ftp = this.workout.ftpOverride ?? settings.current.ftp;
+    const ftp = this.workout!.ftpOverride ?? settings.current.ftp;
     return Math.round(ratio * ftp * this.ergBias);
   }
 
@@ -340,6 +395,7 @@ export class Session extends Emitter<SessionEvents> {
   loadWorkout(workout: Workout | undefined): void {
     if (this.state === 'running') this.pause();
     this.workout = workout;
+    this.override = undefined;
     this.elapsed = 0;
     this.segmentIndex = -1;
     this.pastWorkoutEnd = false;
@@ -393,6 +449,7 @@ export class Session extends Emitter<SessionEvents> {
   }
 
   private resetRide(): void {
+    this.override = undefined;
     this.elapsed = 0;
     this.distance = 0;
     this.virtualSpeed = undefined;
@@ -430,6 +487,8 @@ export class Session extends Emitter<SessionEvents> {
   }
 
   setErgBias(bias: number): void {
+    // An override is exact watts; bias waits, unchanged, for the block to end.
+    if (this.activeOverride()) return;
     this.ergBias = clamp(bias, 0.5, 1.5);
     this.pushTrainerCommand(true);
     this.emit('tick', this.snapshot);
@@ -441,6 +500,47 @@ export class Session extends Emitter<SessionEvents> {
     this.grade = clamp(grade, -10, 20);
     this.pushTrainerCommand(true);
     this.emit('tick', this.snapshot);
+  }
+
+  /**
+   * Hold `watts` for the rest of the current ERG block instead of the
+   * workout's target × bias; undefined clears it. Refused (false) outside an
+   * ERG block or outside MIN_TARGET_WATTS..MAX_TARGET_WATTS.
+   */
+  setBlockOverride(watts: number | undefined): boolean {
+    if (watts === undefined) {
+      if (!this.override) return true;
+      this.override = undefined;
+    } else {
+      const segment = this.ergSegment();
+      if (!segment || !validWatts(watts)) return false;
+      this.override = { segmentIndex: segment.index, watts: Math.round(watts) };
+    }
+    this.lastTargetSent = undefined;
+    this.pushTrainerCommand(true);
+    this.emit('tick', this.snapshot);
+    return true;
+  }
+
+  /** Whether free riding holds a gradient or a power. Choosing power for the
+   *  first time starts it at 60 % of FTP, to the nearest 5 W. */
+  setFreeTarget(target: FreeTarget): void {
+    this.freeTarget = target;
+    if (target === 'power') this.freePower ??= Math.round((0.6 * settings.current.ftp) / 5) * 5;
+    this.lastTargetSent = undefined;
+    this.lastGradeSent = undefined;
+    this.pushTrainerCommand(true);
+    this.emit('tick', this.snapshot);
+  }
+
+  /** The free-riding power target. Refused (false) outside MIN..MAX_TARGET_WATTS. */
+  setFreePower(watts: number): boolean {
+    if (!validWatts(watts)) return false;
+    this.freePower = Math.round(watts);
+    this.lastTargetSent = undefined;
+    this.pushTrainerCommand(true);
+    this.emit('tick', this.snapshot);
+    return true;
   }
 
   /** In free mode, take the gradient from the loaded route instead of the slider. */
@@ -569,6 +669,8 @@ export class Session extends Emitter<SessionEvents> {
     if (index === this.segmentIndex) return;
     if (this.segmentIndex >= 0) this.closeLap(segment?.label ?? 'Lap');
     this.segmentIndex = index;
+    // An override belongs to the block it was typed in.
+    if (this.override && this.override.segmentIndex !== index) this.override = undefined;
     this.lastTargetSent = undefined;
     this.emit('segment', { segment, index });
   }
@@ -629,7 +731,7 @@ export class Session extends Emitter<SessionEvents> {
     if (!control) return;
     const snap = this.snapshot;
 
-    if (snap.effectiveMode === 'erg') {
+    if (snap.controlMode === 'power') {
       const target = snap.targetPower;
       if (force || this.lastTargetSent === undefined || Math.abs(target - this.lastTargetSent) >= 1) {
         this.lastTargetSent = target;

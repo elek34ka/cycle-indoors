@@ -4,7 +4,9 @@ import { hrZoneColor, zoneForPower } from '../core/zones';
 import { courseStore } from '../activity/course-store';
 import { gradientColor, type Course } from '../activity/course';
 import { mock } from '../devices/setup';
-import { session, type SessionSnapshot } from '../session/session';
+import {
+  MAX_TARGET_WATTS, MIN_TARGET_WATTS, session, type FreeTarget, type SessionSnapshot,
+} from '../session/session';
 import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
@@ -24,6 +26,8 @@ interface TileSpec {
   sub?: (s: SessionSnapshot) => string | SubPart[];
   stripe?: (s: SessionSnapshot) => string | undefined;
   visible?: (s: SessionSnapshot) => boolean;
+  /** tiles sharing a key are stacked, half height, in one grid cell */
+  stack?: string;
 }
 
 /** "avg 210 · lap 215" — the session and current-lap averages for a metric,
@@ -57,17 +61,20 @@ const TILES: TileSpec[] = [
     key: 'target',
     label: () => 'Target',
     unit: 'W',
-    value: (s) => (s.effectiveMode === 'free' ? '—' : int(s.targetPower)),
+    value: (s) => (s.controlMode === 'grade' ? '—' : int(s.targetPower)),
     sub: (s) => {
       // Without a controllable trainer the target is only advice, and saying so
       // is better than letting the rider wonder why the brake is not moving.
       if (!s.canControlTrainer) return 'no trainer control';
-      if (s.effectiveMode === 'free') {
+      if (s.controlMode === 'grade') {
         return s.followCourse ? `route ${dec(s.effectiveGrade, 1)}%` : `grade ${dec(s.effectiveGrade, 1)}%`;
       }
+      // Typed watts are exact: bias does not apply to them, so it is not shown.
+      const source = s.effectiveMode === 'free'
+        ? 'free'
+        : s.blockOverride !== undefined ? 'override' : `bias ${Math.round(s.ergBias * 100)}%`;
       const delta = s.smoothedPower !== undefined && s.targetPower > 0 ? s.smoothedPower - s.targetPower : undefined;
-      const bias = Math.round(s.ergBias * 100);
-      return delta === undefined ? `bias ${bias}%` : `${delta >= 0 ? '+' : ''}${delta} W · bias ${bias}%`;
+      return delta === undefined ? source : `${delta >= 0 ? '+' : ''}${delta} W · ${source}`;
     },
     stripe: (s) => (s.targetPower > 0 ? zoneForPower(s.targetPower, settings.current.ftp).color : undefined),
   },
@@ -85,6 +92,7 @@ const TILES: TileSpec[] = [
     unit: 'rpm',
     value: (s) => int(s.live.cadence),
     sub: (s) => (s.targetCadence ? `target ${s.targetCadence}` : ''),
+    stack: 'motion',
   },
   {
     key: 'speed',
@@ -92,20 +100,7 @@ const TILES: TileSpec[] = [
     unit: 'km/h',
     value: (s) => dec(s.speed, 1),
     sub: (s) => `${(s.distance / 1000).toFixed(2)} km`,
-  },
-  {
-    key: 'ascent',
-    label: () => 'Climbed',
-    unit: 'm',
-    value: (s) => int(s.coursePosition?.totalAscent),
-    sub: (s) => {
-      const course = courseStore.current;
-      if (!course || !s.coursePosition) return '';
-      const grade = `${s.coursePosition.gradient >= 0 ? '+' : ''}${s.coursePosition.gradient.toFixed(1)}%`;
-      return `${grade} · ${Math.round(course.totalAscent)} m/lap`;
-    },
-    stripe: (s) => (s.coursePosition ? gradientColor(s.coursePosition.gradient) : undefined),
-    visible: (s) => s.coursePosition !== undefined,
+    stack: 'motion',
   },
   {
     key: 'time',
@@ -117,6 +112,41 @@ const TILES: TileSpec[] = [
     },
   },
 ];
+
+function wattsInput(title: string): HTMLInputElement {
+  return el('input', {
+    type: 'number', class: 'watts', title,
+    min: String(MIN_TARGET_WATTS), max: String(MAX_TARGET_WATTS), step: '5',
+  }) as HTMLInputElement;
+}
+
+/**
+ * Commit a watts field on `change` (Enter or leaving it), never per keystroke,
+ * so typing "2" on the way to "250" never reaches the trainer. A refused value
+ * is put back by the next render, which shows the target in force; Escape and
+ * an empty field call `clear`, when there is one.
+ */
+function commitWatts(input: HTMLInputElement, set: (watts: number) => boolean, clear?: () => void): void {
+  input.addEventListener('change', () => {
+    const text = input.value.trim();
+    if (text === '') clear?.();
+    else set(Number(text));
+    input.blur();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    input.value = '';
+    clear?.();
+    input.blur();
+  });
+}
+
+/** Show the value in force, unless the rider is typing in the field. */
+function showWatts(input: HTMLInputElement, watts: number | undefined): void {
+  if (document.activeElement === input) return;
+  const text = watts === undefined ? '' : String(watts);
+  if (input.value !== text) input.value = text;
+}
 
 export class RideView {
   private graph: ProfileGraph;
@@ -140,6 +170,12 @@ export class RideView {
   private gradeGroup!: HTMLElement;
   private legsGroup!: HTMLElement;
   private biasReadout!: HTMLElement;
+  private biasButtons: HTMLButtonElement[] = [];
+  private overrideInput!: HTMLInputElement;
+  private freeButtons = new Map<FreeTarget, HTMLButtonElement>();
+  private gradeControls!: HTMLElement;
+  private freePowerControls!: HTMLElement;
+  private freePowerInput!: HTMLInputElement;
   private gradeReadout!: HTMLElement;
   private gradeInput!: HTMLInputElement;
   private followLabel!: HTMLElement;
@@ -189,18 +225,29 @@ export class RideView {
   private buildTiles(): void {
     const host = qs('#metrics');
     clear(host);
+    const stacks = new Map<string, HTMLElement>();
     for (const spec of TILES) {
       const stripe = el('div', { class: 'tile-stripe' });
       const value = el('span', { text: '--' });
       const sub = el('div', { class: 'tile-sub', text: '' });
       const label = el('div', { class: 'tile-label', text: spec.label(session.snapshot) });
-      const root = el('div', { class: 'tile' }, [
-        stripe,
-        label,
-        el('div', { class: 'tile-value' }, [value, spec.unit ? el('span', { class: 'tile-unit', text: spec.unit }) : null]),
-        sub,
-      ]);
-      host.append(root);
+      const valueRow = el('div', { class: 'tile-value' }, [value, spec.unit ? el('span', { class: 'tile-unit', text: spec.unit }) : null]);
+      // A stacked tile is half height: its label and sub-line share a column
+      // beside the value instead of each taking a row.
+      const root = spec.stack
+        ? el('div', { class: 'tile tile-compact' }, [stripe, el('div', { class: 'tile-head' }, [label, sub]), valueRow])
+        : el('div', { class: 'tile' }, [stripe, label, valueRow, sub]);
+      if (spec.stack) {
+        let cell = stacks.get(spec.stack);
+        if (!cell) {
+          cell = el('div', { class: 'tile-stack' });
+          stacks.set(spec.stack, cell);
+          host.append(cell);
+        }
+        cell.append(root);
+      } else {
+        host.append(root);
+      }
       this.tiles.set(spec.key, { value, sub, stripe, label, root });
     }
   }
@@ -228,11 +275,20 @@ export class RideView {
     }
 
     this.biasReadout = el('div', { class: 'readout', text: '100%' });
+    this.biasButtons = [
+      el('button', { class: 'btn btn-small', text: '−', on: { click: () => session.nudgeBias(-0.01) } }),
+      el('button', { class: 'btn btn-small', text: '+', on: { click: () => session.nudgeBias(0.01) } }),
+    ];
+    this.overrideInput = wattsInput('Hold exactly this many watts until the block ends (Esc or empty to clear)');
+    this.overrideInput.dataset.role = 'block-watts';
+    commitWatts(this.overrideInput, (watts) => session.setBlockOverride(watts), () => session.setBlockOverride(undefined));
     this.biasGroup = el('div', { class: 'group' }, [
       el('label', { text: 'Bias' }),
-      el('button', { class: 'btn btn-small', text: '−', on: { click: () => session.nudgeBias(-0.01) } }),
+      this.biasButtons[0],
       this.biasReadout,
-      el('button', { class: 'btn btn-small', text: '+', on: { click: () => session.nudgeBias(0.01) } }),
+      this.biasButtons[1],
+      this.overrideInput,
+      el('span', { class: 'unit', text: 'W' }),
     ]);
 
     this.gradeInput = el('input', { type: 'range', min: '-10', max: '20', step: '0.5', value: '0' }) as HTMLInputElement;
@@ -245,8 +301,26 @@ export class RideView {
       this.followInput, el('span', { text: 'Follow route' }),
     ]);
 
+    const freeToggle = el('div', { class: 'toggle' });
+    for (const target of ['grade', 'power'] as const) {
+      const btn = el('button', {
+        text: target === 'grade' ? 'Grade' : 'Watts',
+        title: target === 'grade' ? 'Trainer emulates a gradient' : 'Trainer holds the watts you type',
+        dataset: { freeTarget: target },
+        on: { click: () => session.setFreeTarget(target) },
+      });
+      this.freeButtons.set(target, btn);
+      freeToggle.append(btn);
+    }
+    this.gradeControls = el('span', { class: 'subgroup' }, [this.gradeInput, this.gradeReadout, this.followLabel]);
+    this.freePowerInput = wattsInput('The power to hold while riding free');
+    this.freePowerInput.dataset.role = 'free-watts';
+    // Clearing the free watts is not a thing: Grade is how to stop holding them.
+    commitWatts(this.freePowerInput, (watts) => session.setFreePower(watts));
+    this.freePowerControls = el('span', { class: 'subgroup' }, [this.freePowerInput, el('span', { class: 'unit', text: 'W' })]);
+
     this.gradeGroup = el('div', { class: 'group' }, [
-      el('label', { text: 'Grade' }), this.gradeInput, this.gradeReadout, this.followLabel,
+      el('label', { text: 'Free' }), freeToggle, this.gradeControls, this.freePowerControls,
     ]);
 
     const legs = el('input', { type: 'range', min: '0', max: '150', step: '5', value: '65' }) as HTMLInputElement;
@@ -545,6 +619,16 @@ export class RideView {
     if (this.followInput.checked !== s.followCourse) this.followInput.checked = s.followCourse;
     this.gradeInput.disabled = s.followCourse;
     setText(this.biasReadout, `${Math.round(s.ergBias * 100)}%`);
+    const overridden = s.blockOverride !== undefined;
+    for (const btn of this.biasButtons) btn.disabled = overridden;
+    setClass(this.biasReadout, 'inert', overridden);
+    showWatts(this.overrideInput, s.blockOverride);
+    // An empty field reads as "following the workout", and says what that is.
+    this.overrideInput.placeholder = !overridden && s.targetPower > 0 ? String(s.targetPower) : '';
+    for (const [target, btn] of this.freeButtons) setClass(btn, 'on', s.freeTarget === target);
+    this.gradeControls.style.display = s.freeTarget === 'grade' ? '' : 'none';
+    this.freePowerControls.style.display = s.freeTarget === 'power' ? '' : 'none';
+    showWatts(this.freePowerInput, s.freePower);
     setText(this.gradeReadout, `${s.effectiveGrade.toFixed(1)}%`);
     this.gradeReadout.style.color = s.followCourse ? gradientColor(s.effectiveGrade) : '';
     if (document.activeElement !== this.gradeInput) this.gradeInput.value = String(s.grade);

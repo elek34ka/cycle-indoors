@@ -31,10 +31,21 @@ export type SmoothingPresetName = 'light' | 'medium' | 'strong';
 export type SmoothingPreset = SmoothingPresetName | 'custom';
 
 export const PRESETS: Record<SmoothingPresetName, SmoothingParams> = {
-  light: { spacing: 10, spikeThreshold: 4, window: 5, maxChange: 1.5, minGradient: -20, maxGradient: 20 },
-  medium: { spacing: 10, spikeThreshold: 3, window: 9, maxChange: 1, minGradient: -15, maxGradient: 15 },
-  strong: { spacing: 10, spikeThreshold: 3, window: 15, maxChange: 0.5, minGradient: -12, maxGradient: 12 },
+  light: { spacing: 10, spikeThreshold: 3, window: 9, maxChange: 1, minGradient: -15, maxGradient: 15 },
+  medium: { spacing: 10, spikeThreshold: 3, window: 15, maxChange: 0.5, minGradient: -12, maxGradient: 12 },
+  strong: { spacing: 10, spikeThreshold: 2.5, window: 25, maxChange: 0.3, minGradient: -8, maxGradient: 8 },
 };
+
+/** The named preset holding exactly these values, or 'custom'. Saved settings
+ *  are labelled this way on load, so a preset whose values were later changed
+ *  never claims numbers it no longer has. */
+export function matchPreset(params: SmoothingParams): SmoothingPreset {
+  const keys = Object.keys(PRESETS.medium) as (keyof SmoothingParams)[];
+  for (const [name, preset] of Object.entries(PRESETS) as [SmoothingPresetName, SmoothingParams][]) {
+    if (keys.every((k) => params[k] === preset[k])) return name;
+  }
+  return 'custom';
+}
 
 export const PRESET_LABELS: Record<SmoothingPreset, string> = {
   light: 'Light', medium: 'Medium', strong: 'Strong', custom: 'Custom',

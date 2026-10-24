@@ -53,9 +53,19 @@ try { bootApp(); } catch (err) { bootError = err as Error; }
 suite('boot', () => {
   check('bootApp does not throw', bootError === undefined, bootError?.stack);
   check('older settings load with the map in its default corner', settings.current.miniMapPosition === null);
-  check('seven metric tiles are rendered', doc.querySelectorAll('#metrics .tile').length === 7,
+  check('six metric tiles are rendered', doc.querySelectorAll('#metrics .tile').length === 6,
     `got ${doc.querySelectorAll('#metrics .tile').length}`);
-  check('the climb tile is hidden until a route is loaded', tile(5).hidden);
+  check('in five grid cells', doc.querySelector('#metrics')?.children.length === 5,
+    String(doc.querySelector('#metrics')?.children.length));
+  const order = Array.from(doc.querySelectorAll('#metrics .tile-label')).map((l) => l.textContent);
+  check('Power, Target, Heart rate, Cadence, Speed, Elapsed',
+    order.join(', ') === 'Power 3s, Target, Heart rate 3s, Cadence, Speed, Elapsed', order.join(', '));
+  check('there is no Climbed tile', !order.includes('Climbed'));
+  const stack = doc.querySelector('#metrics')?.children.item(3);
+  const stacked = Array.from(stack?.querySelectorAll('.tile-label') ?? []).map((l) => l.textContent);
+  check('the fourth cell holds Cadence above Speed', stack?.classList.contains('tile-stack') === true
+    && stacked.join(' / ') === 'Cadence / Speed', stacked.join(' / '));
+  check('both are compact tiles', Array.from(stack?.children ?? []).every((t) => t.classList.contains('tile-compact')));
   check('the elevation strip is collapsed with no route',
     doc.querySelector('#graph-stack')?.classList.contains('no-route'));
   check('the map is not offered with no route loaded',
@@ -204,7 +214,7 @@ suite('sub-lines with emphasised parts', () => {
   check('a session average alone reads "avg 210"',
     sessionOnly.map((p) => p.text).join('') === 'avg 210', sessionOnly.map((p) => p.text).join(''));
   check('a session average alone has one strong part', sessionOnly.filter((p) => p.strong).length === 1);
-  for (const [index, name] of [[1, 'Target'], [3, 'Cadence'], [4, 'Speed'], [6, 'Elapsed']] as const) {
+  for (const [index, name] of [[1, 'Target'], [3, 'Cadence'], [4, 'Speed'], [5, 'Elapsed']] as const) {
     const sub = tile(index).root?.querySelector('.tile-sub');
     check(`the ${name} sub-line is not emphasised`,
       sub !== null && sub !== undefined && sub.querySelector('b') === null && !sub.classList.contains('has-parts'));
@@ -289,11 +299,10 @@ suite('a loaded route drives the ride', () => {
     doc.querySelector('#mini-map-host .mini-map-title')?.textContent ?? 'none');
   check('the route stats list filled in', (doc.querySelectorAll('#route-stats .row').length ?? 0) >= 5,
     String(doc.querySelectorAll('#route-stats .row').length));
-  check('the climb tile is now visible', !tile(5).hidden);
-  check('the climb tile is labelled Climbed', tile(5).label === 'Climbed', tile(5).label);
-  check('the climb tile shows a number', /^\d+$/.test(tile(5).value), tile(5).value);
-  check('the climb tile sub-line shows the gradient and the climb per lap',
-    /[+-]\d+\.\d% · \d+ m\/lap/.test(tile(5).sub), tile(5).sub);
+  const labels = Array.from(doc.querySelectorAll('#metrics .tile-label')).map((l) => l.textContent);
+  check('still six tiles and no Climbed tile with a route', labels.length === 6 && !labels.includes('Climbed'),
+    labels.join(', '));
+  check('the Speed tile carries the distance', /^\d+\.\d{2} km$/.test(tile(4).sub), tile(4).sub);
 
   check('the session reports a position on the course', courseSnap.coursePosition !== undefined);
   check('following the route overrides the manual grade',
@@ -334,7 +343,7 @@ suite('the workout hands over to free riding instead of ending the ride', () => 
   check('the interval bar says the workout is complete',
     doc.querySelector('#interval-bar .now')?.textContent?.includes('complete') ?? false,
     doc.querySelector('#interval-bar .now')?.textContent ?? 'none');
-  check('the time tile says so too', tile(6).sub === 'workout done · free riding', tile(6).sub);
+  check('the time tile says so too', tile(5).sub === 'workout done · free riding', tile(5).sub);
   check('every block is marked done',
     doc.querySelectorAll('#segment-list li.done').length === overrun.workout!.segments.length,
     String(doc.querySelectorAll('#segment-list li.done').length));

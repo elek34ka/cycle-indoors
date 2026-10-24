@@ -45,11 +45,13 @@ tablet on the same network you would need to serve the app over https.
   free-ride block
   overrides ERG mode, so the trainer follows the gradient — or the loaded
   route's gradient — instead of a target.
-- **Live ride view** — tiles for power, target, heart rate, cadence, speed,
-  metres climbed and time, their values in large figures that read from the
-  saddle. Power and heart rate show a 3-second average (the
-  window is configurable) with the session and current-lap averages underneath,
-  their numbers in bold so they can be read at a glance.
+- **Live ride view** — tiles for power, target, heart rate, cadence and speed
+  (stacked as two half-height tiles in one cell) and time, their values in
+  large figures that read from the saddle. Metres climbed and the gradient are
+  on the elevation strip, not a tile. Power and heart rate show a 3-second
+  average (the window is configurable) with the session and current-lap
+  averages underneath, their numbers large and bold so they can be read at a
+  glance.
   A canvas workout profile coloured by power zone carries your actual power and
   heart rate over it, averaged over the same window as the tiles so the lines do
   not jitter (the exported file keeps every raw second); the current block is highlighted, with the next block and
@@ -71,16 +73,27 @@ tablet on the same network you would need to serve the app over https.
   it by its title bar anywhere in the window. It stays on screen, the position
   is remembered across reloads, and double-clicking the title puts it back in
   the corner. In free mode, "Follow route" hands the course's gradient to the trainer instead
-  of the slider.
+  of the slider. It is switched on whenever a route is loaded; turn it off and
+  it stays off until the next route.
 - **Gradient-true speed on a route** — with a route loaded, your speed, your
   position on it and the speed/distance in the exported `.fit` come from your
   power, rider + bike weight (Settings) and the gradient under the wheels, with
   inertia, in every mode. ERG holds its power target and climbs are still ridden
   at climbing speed, so segment times on the uploaded ride mean something. This
   never changes what the trainer is sent: ERG sends only the target, and free
-  mode sends the slider or, with "Follow route", the route gradient. Set your
+  mode sends the slider or, with "Follow route", the route gradient (or the
+  watts you chose, with Watts). Set your
   weight. It is what makes 200 W at 8% the right speed. With no route, speed
   is whatever the trainer or speed sensor reports.
+- **Your own watts** — in an ERG block, a watts field next to Bias holds exactly
+  what you type (25–2000 W) for the rest of that block, with no bias; the Bias
+  buttons and ↑/↓ are disabled meanwhile. The next block, `▶|`, a `+30s` into
+  the next block, a new workout or emptying the field (or Escape) hands back to
+  the workout's target × bias. Whenever you are riding free — a FreeRide block,
+  after the workout ends, an open ride or the Free toggle — a **Grade / Watts**
+  switch picks between the gradient (slider or route) and a power target you
+  type, starting at 60 % of FTP. The choice and the number carry over from one
+  free stretch to the next. The recorded target power is whatever was held.
 - **The end of a workout is not the end of the ride** — when the last block
   runs out the workout hands over to free riding: the clock keeps going, the
   trainer switches from the ERG target to the gradient, a lap is closed at the
@@ -88,7 +101,7 @@ tablet on the same network you would need to serve the app over https.
   The ride finishes when you say so. There is no way back into a finished
   workout.
 - **Controls** — start/pause, finish, lap, ERG bias ±, free-mode gradient,
-  next block (`▶|`) and `+30s`. The workout clock only moves forward: there is
+  typed watts (below), next block (`▶|`) and `+30s`. The workout clock only moves forward: there is
   no previous block or −30 s, and clicking the graph or a block in the list
   does not jump, so a stray tap mid-ride cannot send you back. Space
   (start/pause), ↑/↓ (bias), `L` (lap), `M` (map) and `W` (workout panel) are
@@ -159,7 +172,8 @@ Real sensors over Web Bluetooth, pairing from the Devices tab:
 Trainer control over the FTMS control point (0x2AD9), so the workout drives the
 brake:
 
-- **ERG** — the workout's target, biased by the ± control, written as
+- **ERG** — the workout's target, biased by the ± control, or the watts typed
+  for the block or for free riding, written as
   `Set Target Power` (opcode 0x05) and clamped to the range the trainer
   reported in its Supported Power Range.
 - **Free / simulation mode** — the gradient from the slider, or from the loaded
@@ -264,8 +278,13 @@ not change until you ask. The panel then:
   how much.
 
 **Light**, **Medium** (the default) and **Strong** set all of these at once,
-and an Advanced section exposes each one. Editing a field switches the preset
-to Custom, and the values are remembered. Two charts compare the original
+and an Advanced section exposes each one. Light (9-point window, ±15 %) only
+takes off the jitter; Medium (15 points, ±12 %, 0.5 per 10 m) also softens the
+ramps; Strong (25 points, ±8 %, 0.3 per 10 m) flattens everything into long,
+gentle grades. Editing a field switches the preset to Custom, and the values
+are remembered. Saved values are labelled by the preset they match, so a setup
+saved before the presets moved keeps its numbers and shows whichever name now
+fits them, or Custom. Two charts compare the original
 (thin grey) with the result (blue): elevation, then gradient, with the
 gradient limits dashed. Hovering either chart reads both out at that point.
 Under them a map shows where the route goes. The line is coloured by the

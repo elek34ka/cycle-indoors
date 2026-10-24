@@ -4,7 +4,7 @@ const dom = setupDom();
 dom.window.localStorage.setItem('cycle-indoors.settings.v1', JSON.stringify({ ftp: 250 }));
 
 const {
-  PRESETS, normaliseParams, validateParams, routeProblem, resample, routeDistances, removeSpikes,
+  PRESETS, matchPreset, normaliseParams, validateParams, routeProblem, resample, routeDistances, removeSpikes,
   savitzkyGolay, smoothProfile, profileStats, gradients, valueAt,
 } = await import('../src/activity/smoothing');
 const { buildGpx, smoothedTrackPoints } = await import('../src/activity/gpx-export');
@@ -13,7 +13,7 @@ const { parseFitActivity } = await import('../src/activity/fit-activity');
 const { buildActivityFit } = await import('../src/activity/fit-export');
 const { computeMetrics } = await import('../src/session/metrics');
 const { readFileSync } = await import('node:fs');
-const { settings } = await import('../src/core/settings');
+const { settings, restoreSettings } = await import('../src/core/settings');
 const { check, near, report, suite } = await import('./harness');
 import type { Sample } from '../src/session/metrics';
 import type { ActivityTrack, TrackPoint } from '../src/activity/types';
@@ -87,6 +87,49 @@ suite('parameters', () => {
     check(`the ${name} preset is valid`, validateParams(preset) === undefined, validateParams(preset));
     check(`the ${name} window is odd`, preset.window % 2 === 1);
   }
+});
+
+/** The preset values before Light, Medium and Strong were shifted one step stronger. */
+const OLD_LIGHT: SmoothingParams = { spacing: 10, spikeThreshold: 4, window: 5, maxChange: 1.5, minGradient: -20, maxGradient: 20 };
+const OLD_STRONG: SmoothingParams = { spacing: 10, spikeThreshold: 3, window: 15, maxChange: 0.5, minGradient: -12, maxGradient: 12 };
+
+suite('presets', () => {
+  const tuple = (p: SmoothingParams) => [p.spacing, p.spikeThreshold, p.window, p.maxChange, p.minGradient, p.maxGradient].join(',');
+  check('Light is 10, 3, 9, 1, ±15', tuple(PRESETS.light) === '10,3,9,1,-15,15', tuple(PRESETS.light));
+  check('Medium is 10, 3, 15, 0.5, ±12', tuple(PRESETS.medium) === '10,3,15,0.5,-12,12', tuple(PRESETS.medium));
+  check('Strong is 10, 2.5, 25, 0.3, ±8', tuple(PRESETS.strong) === '10,2.5,25,0.3,-8,8', tuple(PRESETS.strong));
+  check('the old Strong values are now Medium', matchPreset(OLD_STRONG) === 'medium', matchPreset(OLD_STRONG));
+  check('the old Light values are Custom', matchPreset(OLD_LIGHT) === 'custom', matchPreset(OLD_LIGHT));
+  check('Strong is recognised', matchPreset({ ...PRESETS.strong }) === 'strong');
+  check('one changed value makes it Custom', matchPreset({ ...PRESETS.light, maxGradient: 14 }) === 'custom');
+});
+
+suite('Strong', () => {
+  // Flat, then a 2 km climb at 12 %, then flat: 240 m to gain.
+  const wall = route(5000, (d) => 100 + 0.12 * Math.min(2000, Math.max(0, d - 1000)));
+  const p = smoothProfile(wall, PRESETS.strong);
+  const g = p.smoothedGradient;
+  check('a 12 % climb is capped at 8 %', Math.max(...g) <= 8 + EPS, `max ${Math.max(...g)}`);
+  check('and nothing is steeper than −8 %', Math.min(...g) >= -8 - EPS, `min ${Math.min(...g)}`);
+  check('the gradient changes by at most 0.3 per 10 m', p.stats.smoothed.maxChange <= 0.3 + 1e-7,
+    `got ${p.stats.smoothed.maxChange}`);
+  check('the 3 km of route at most 8 % can still climb 240 m', p.anchorShortfall === undefined, String(p.anchorShortfall));
+
+  // 1 km of road cannot climb 120 m at 8 %.
+  const short = route(1000, (d) => 100 + 0.12 * d);
+  const ps = smoothProfile(short, PRESETS.strong);
+  check('a finish the limits cannot reach is reported', ps.anchorShortfall !== undefined && ps.anchorShortfall > 1,
+    String(ps.anchorShortfall));
+
+  const sample = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'sample');
+  const [light, medium, strong] = (['light', 'medium', 'strong'] as const).map((n) => smoothProfile(sample, PRESETS[n]).stats.smoothed);
+  check('on the sample loop the largest change does not grow from Light to Strong',
+    light.maxChange >= medium.maxChange - 1e-9 && medium.maxChange >= strong.maxChange - 1e-9,
+    `${light.maxChange} ${medium.maxChange} ${strong.maxChange}`);
+  const steepest = (s: typeof light) => Math.max(s.maxGradient, -s.minGradient);
+  check('nor does the steepest gradient',
+    steepest(light) >= steepest(medium) - 1e-9 && steepest(medium) >= steepest(strong) - 1e-9,
+    `${steepest(light)} ${steepest(medium)} ${steepest(strong)}`);
 });
 
 suite('which routes can be smoothed', () => {
@@ -247,7 +290,7 @@ suite('before and after figures', () => {
   const noisy = smoothProfile(noisyRoute(42), MEDIUM);
   check('smoothing does not add climbing', noisy.stats.smoothed.ascent <= noisy.stats.original.ascent,
     `${noisy.stats.smoothed.ascent} vs ${noisy.stats.original.ascent}`);
-  check('the largest change is within Medium\'s limit', noisy.stats.smoothed.maxChange <= 1 + 1e-7,
+  check('the largest change is within Medium\'s limit', noisy.stats.smoothed.maxChange <= MEDIUM.maxChange + 1e-7,
     `got ${noisy.stats.smoothed.maxChange}`);
   check('the original was much rougher', noisy.stats.original.maxChange > 5);
 });
@@ -295,6 +338,12 @@ suite('remembered parameters', () => {
   const loaded = settings.current.routeSmoothing;
   check('older settings load with Medium', loaded.preset === 'medium' && loaded.window === PRESETS.medium.window);
   check('and keep what they had', settings.current.ftp === 250);
+  const oldStrong = restoreSettings({ routeSmoothing: { ...OLD_STRONG, preset: 'strong' } }).routeSmoothing;
+  check('settings saved under the old Strong load as Medium', oldStrong.preset === 'medium', oldStrong.preset);
+  check('with the same values', oldStrong.window === 15 && oldStrong.maxGradient === 12 && oldStrong.minGradient === -12);
+  const oldLight = restoreSettings({ routeSmoothing: { ...OLD_LIGHT, preset: 'light' } }).routeSmoothing;
+  check('settings saved under the old Light load as Custom', oldLight.preset === 'custom', oldLight.preset);
+  check('with the same values', oldLight.window === 5 && oldLight.maxGradient === 20);
   settings.patch({ routeSmoothing: { ...PRESETS.strong, preset: 'custom', maxGradient: 9 } });
   settings.reset();
   check('reset restores Medium', settings.current.routeSmoothing.preset === 'medium'

@@ -246,11 +246,12 @@ main { min-height: 0; position: relative; }
 }
 .graph-stack.no-route { grid-template-rows: minmax(120px, 1fr) 34px; }
 
-/* 188 px: "3:59:59" at the 40 px tile value is ~161 px in a monospace face
-   (7 × ~24 px, less 1 px letter-spacing each), plus 26 px of padding and border. */
+/* 196 px: "3:59:59" at the 40 px tile value is ~161 px in a monospace face
+   (7 × ~24 px, less 1 px letter-spacing each), plus 26 px of padding and border;
+   "avg 999 · lap 999" with 20 px numbers is ~158 px, so a little more room. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
   gap: 8px;
 }
 
@@ -280,11 +281,34 @@ main { min-height: 0; position: relative; }
 .tile .tile-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; }
 .tile .tile-sub { font-size: 13px; color: var(--text-faint); font-family: var(--mono); }
 /* Session and lap averages: on --bg-raised the labels are 6.8:1 and the bold
-   numbers 15:1, so they read from the saddle without growing the text. */
-.tile .tile-sub.has-parts { color: var(--text-dim); }
-.tile .tile-sub b { color: var(--text); font-weight: 700; }
+   numbers 15:1, and the numbers are drawn larger than their labels, so they
+   read from the saddle. One line, never wrapped. */
+.tile .tile-sub.has-parts { color: var(--text-dim); white-space: nowrap; overflow: hidden; }
+.tile .tile-sub b { color: var(--text); font-weight: 700; font-size: 20px; line-height: 1.2; }
 .tile.accent { border-color: #2c4f74; }
 .tile .tile-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+
+/* Cadence over Speed in one cell. The row's height comes from the full tiles
+   (~105 px with the 20 px averages); each half is 10 px of padding and border
+   around a 28 px value, ~41 px, so two and the gap stay inside it. */
+.tile-stack {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.tile.tile-compact {
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 0;
+}
+.tile-compact .tile-head { min-width: 0; }
+.tile-compact .tile-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.tile-compact .tile-value { font-size: 28px; line-height: 1.1; }
 
 .interval-bar {
   display: flex;
@@ -364,6 +388,23 @@ main { min-height: 0; position: relative; }
   font-weight: 600;
 }
 .controls .readout { font-family: var(--mono); min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.controls .readout.inert { color: var(--text-faint); }
+.controls .subgroup { display: inline-flex; align-items: center; gap: 6px; }
+.controls .unit { font-size: 13px; color: var(--text-faint); }
+.controls input.watts {
+  width: 72px;
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: #161d28;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 5px 7px;
+}
+.controls input.watts:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.controls input.watts::placeholder { color: var(--text-faint); }
 
 .controls .check {
   display: inline-flex;
