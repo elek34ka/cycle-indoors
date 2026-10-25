@@ -91,23 +91,35 @@ type SessionEvents = {
  *  makes trainers drop commands. */
 class CommandQueue {
   private pending: (() => Promise<void>) | undefined;
-  private lastRun = 0;
+  private lastRun = -Infinity;
   private timer: number | undefined;
 
-  constructor(private minIntervalMs: number) {}
+  constructor(private minIntervalMs: number, private readonly now: () => number) {}
 
   push(task: () => Promise<void>): void {
     this.pending = task;
-    const wait = Math.max(0, this.minIntervalMs - (performance.now() - this.lastRun));
     if (this.timer !== undefined) return;
-    this.timer = window.setTimeout(() => {
-      this.timer = undefined;
-      const next = this.pending;
-      this.pending = undefined;
-      this.lastRun = performance.now();
-      next?.().catch((err) => console.warn('trainer command failed', err));
-    }, wait);
+    const wait = this.minIntervalMs - (this.now() - this.lastRun);
+    // Straight away when the slot is free: a hidden tab can hold even a
+    // zero-delay timer for up to a minute.
+    if (wait <= 0) this.run();
+    else this.timer = window.setTimeout(this.run, wait);
   }
+
+  /** Sends a waiting command whose interval has passed, for when its timer is
+   *  being held back by background throttling. */
+  flush(): void {
+    if (this.pending && this.now() - this.lastRun >= this.minIntervalMs) this.run();
+  }
+
+  private run = (): void => {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const next = this.pending;
+    this.pending = undefined;
+    this.lastRun = this.now();
+    next?.().catch((err) => console.warn('trainer command failed', err));
+  };
 
   clear(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
@@ -117,6 +129,14 @@ class CommandQueue {
 }
 
 const SAMPLE_INTERVAL = 1; // second
+/** Longest slice of ride time simulated at once; `stepSpeed` needs short steps. */
+const MAX_STEP_SECONDS = 0.5;
+/** A longer gap with no advance at all is a suspended machine, not a hidden
+ *  tab (Chrome throttles hidden timers to about one a minute), and is not
+ *  added to the ride. */
+export const MAX_CATCH_UP_SECONDS = 300;
+/** Advance rate when frames stop; hidden tabs stretch it to a second or more. */
+const BACKGROUND_TICK_MS = 250;
 const BUFFER_SECONDS = 31;
 const WORKOUT_DONE_MESSAGE = 'Workout complete — free riding from here';
 const WORKOUT_DONE_SECONDS = 12;
@@ -157,6 +177,7 @@ export class Session extends Emitter<SessionEvents> {
   private sessionTotals = emptyTotals();
   private lapTotals = emptyTotals();
   private lastFrame: number | undefined;
+  private advancing = false;
   private nextSampleAt = SAMPLE_INTERVAL;
   private segmentIndex = -1;
   private completedLoops = 0;
@@ -167,8 +188,10 @@ export class Session extends Emitter<SessionEvents> {
   private messageUntil = 0;
   private message: string | undefined;
   private firedEvents = new Set<number>();
-  private commands = new CommandQueue(500);
+  private commands: CommandQueue;
   private raf: number | undefined;
+  private timer: number | undefined;
+  private readonly unsubscribe: (() => void)[] = [];
   private spinDown: SpinDownState = SPIN_DOWN_IDLE;
   /** bumped per calibration, so a slow answer to an abandoned one is ignored */
   private spinDownRun = 0;
@@ -177,9 +200,17 @@ export class Session extends Emitter<SessionEvents> {
   /** set once the rider has downloaded this ride, so it can be discarded safely */
   exported = false;
 
-  constructor(private readonly devices: DeviceHub, private readonly spinDownTimeoutMs = SPIN_DOWN_TIMEOUT_MS) {
+  constructor(
+    private readonly devices: DeviceHub,
+    private readonly spinDownTimeoutMs = SPIN_DOWN_TIMEOUT_MS,
+    /** the session's clock in ms; tests pass a fake one to skip time without waiting */
+    private readonly now: () => number = () => performance.now(),
+  ) {
     super();
-    this.devices.on('telemetry', (t) => { this.live = t; });
+    this.commands = new CommandQueue(500, this.now);
+    // Sensor notifications keep arriving in a hidden tab, where frames stop
+    // and timers are throttled, so each one also moves the ride along.
+    this.unsubscribe.push(this.devices.on('telemetry', (t) => { this.live = t; this.advance(); }));
     // A new or removed route restarts the virtual speed from what the sensors say.
     courseStore.on('course', (course) => {
       this.virtualSpeed = undefined;
@@ -190,6 +221,9 @@ export class Session extends Emitter<SessionEvents> {
       if (this.state === 'running') this.pushTrainerCommand(true);
     });
     this.loop();
+    this.timer = window.setInterval(() => this.advance(), BACKGROUND_TICK_MS);
+    // Catch up the moment the rider comes back, not on the next sensor packet.
+    document.addEventListener('visibilitychange', this.onVisibility);
   }
 
   // ---- queries -------------------------------------------------------------
@@ -310,7 +344,7 @@ export class Session extends Emitter<SessionEvents> {
     if (latest === undefined) return undefined;
     const window = settings.current.smoothPowerSeconds;
     if (window <= 0 || buffer.length === 0) return Math.round(latest);
-    const cutoff = performance.now() - window * 1000;
+    const cutoff = this.now() - window * 1000;
     let sum = 0;
     let count = 0;
     for (let i = buffer.length - 1; i >= 0 && buffer[i].t >= cutoff; i--) {
@@ -413,7 +447,7 @@ export class Session extends Emitter<SessionEvents> {
     // A target sent now would land in the middle of the trainer's spin-down.
     if (isActive(this.spinDown)) {
       this.message = CALIBRATING_MESSAGE;
-      this.messageUntil = performance.now() + CALIBRATING_SECONDS * 1000;
+      this.messageUntil = this.now() + CALIBRATING_SECONDS * 1000;
       this.emit('message', CALIBRATING_MESSAGE);
       return;
     }
@@ -599,22 +633,50 @@ export class Session extends Emitter<SessionEvents> {
 
   private loop = (): void => {
     this.raf = requestAnimationFrame(this.loop);
-    const now = performance.now();
-    const dt = this.lastFrame === undefined ? 0 : Math.min(0.5, (now - this.lastFrame) / 1000);
-    this.lastFrame = now;
+    this.advance();
+  };
 
-    this.fillBuffer(this.powerBuffer, this.live.power, now);
-    this.fillBuffer(this.hrBuffer, this.live.heartRate, now);
+  /**
+   * Brings the ride up to the clock. Hidden tabs get no animation frames and
+   * throttled timers, so the gap since the last call can be many seconds; it
+   * is walked in short steps so speed integration, samples, laps and targets
+   * land where they would have had the tab stayed visible. A gap too long to
+   * be throttling (the machine slept) is not credited at all.
+   */
+  advance(now = this.now()): void {
+    if (this.advancing) return;
+    this.advancing = true;
+    try {
+      this.fillBuffer(this.powerBuffer, this.live.power, now);
+      this.fillBuffer(this.hrBuffer, this.live.heartRate, now);
 
-    // A trainer that connects — or comes back after a dropout — mid-ride needs
-    // to be told the current target, or it keeps whatever its brake was on.
-    const controlAvailable = this.devices.control !== undefined;
-    if (controlAvailable !== this.hadControl) {
-      this.hadControl = controlAvailable;
-      if (controlAvailable && this.state === 'running') this.pushTrainerCommand(true);
+      // A trainer that connects — or comes back after a dropout — mid-ride needs
+      // to be told the current target, or it keeps whatever its brake was on.
+      const controlAvailable = this.devices.control !== undefined;
+      if (controlAvailable !== this.hadControl) {
+        this.hadControl = controlAvailable;
+        if (controlAvailable && this.state === 'running') this.pushTrainerCommand(true);
+      }
+
+      const from = this.lastFrame ?? now;
+      const gap = (now - from) / 1000;
+      if (gap > 0 && gap <= MAX_CATCH_UP_SECONDS) {
+        const steps = Math.ceil(gap / MAX_STEP_SECONDS);
+        for (let i = 0; i < steps; i++) this.step(gap / steps);
+      }
+      this.lastFrame = now;
+
+      this.commands.flush();
+      if (this.message && now > this.messageUntil) this.message = undefined;
+      this.emit('tick', this.snapshot);
+    } finally {
+      this.advancing = false;
     }
+  }
 
-    if (this.state === 'running' && dt > 0) {
+  /** One short slice of ride time. */
+  private step(dt: number): void {
+    if (this.state === 'running') {
       this.elapsed += dt;
       this.distance += (this.advanceSpeed(dt) / 3.6) * dt;
 
@@ -625,13 +687,17 @@ export class Session extends Emitter<SessionEvents> {
       this.recordSamples();
       this.pushTrainerCommand(false);
     }
+  }
 
-    if (this.message && now > this.messageUntil) this.message = undefined;
-    this.emit('tick', this.snapshot);
+  private onVisibility = (): void => {
+    if (document.visibilityState === 'visible') this.advance();
   };
 
   dispose(): void {
     if (this.raf !== undefined) cancelAnimationFrame(this.raf);
+    if (this.timer !== undefined) clearInterval(this.timer);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    for (const off of this.unsubscribe.splice(0)) off();
     this.commands.clear();
   }
 
@@ -656,7 +722,7 @@ export class Session extends Emitter<SessionEvents> {
     if (complete) {
       this.closeLap('Free ride');
       this.message = WORKOUT_DONE_MESSAGE;
-      this.messageUntil = performance.now() + WORKOUT_DONE_SECONDS * 1000;
+      this.messageUntil = this.now() + WORKOUT_DONE_SECONDS * 1000;
       this.emit('message', WORKOUT_DONE_MESSAGE);
     }
     this.pushTrainerCommand(true);
@@ -692,7 +758,7 @@ export class Session extends Emitter<SessionEvents> {
       if (this.elapsed > event.time + event.duration) { this.firedEvents.add(event.time); continue; }
       this.firedEvents.add(event.time);
       this.message = event.message;
-      this.messageUntil = performance.now() + event.duration * 1000;
+      this.messageUntil = this.now() + event.duration * 1000;
       this.emit('message', event.message);
     }
   }
@@ -758,6 +824,8 @@ export class Session extends Emitter<SessionEvents> {
   private setState(state: SessionState): void {
     if (this.state === state) return;
     this.state = state;
+    // Time before this moment was not ridden, however stale the last advance.
+    if (state === 'running') this.lastFrame = this.now();
     if (state === 'running') this.pushTrainerCommand(true);
     if (state === 'paused') {
       const control = this.devices.control;

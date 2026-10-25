@@ -118,7 +118,13 @@ tablet on the same network you would need to serve the app over https.
   with the display, or the PC, going to sleep. Switch tabs and the browser
   releases it, and it is taken again when you come back. Closing the lid or an
   OS power policy can still override it. Browsers without the API simply do
-  without. On a finished ride
+  without.
+- **The ride keeps going in the background** — switch tabs or windows mid-ride
+  and the clock, distance, samples, block changes and ERG targets carry on. A
+  connected trainer's own data moves the ride along while the browser holds
+  back the hidden page, and the dashboard is caught up the moment you return.
+  A gap of over 5 minutes in which nothing could run at all (the computer
+  slept) is not added to the ride. On a finished ride
   the start button reads **Start new ride** and asks before discarding a ride
   that has not been downloaded — once you have saved the `.fit`, it stops
   asking.
@@ -566,6 +572,14 @@ curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.d
   next block advance it, a backward seek is refused, `+30s` at 59:50 of an
   hour stops on 60:00, and once the workout has run out neither control moves
   the clock (next block from the last block would otherwise step back to the end).
+- **background-clock** — a session with animation frames switched off and a
+  clock moved by hand, standing in for a hidden tab. A 30 s gap is ridden in
+  full: 30 s, 30 samples, 300 m. A block boundary inside one gap lands at the
+  block's own start. A 40-minute suspension is not credited, and nor is a
+  pause. Sensor packets alone move the ride, and returning to the tab shows it
+  caught up at once. Over the fake GATT, with every timer held, the next
+  block's 250 W target still reaches the trainer on the back of its own
+  notifications.
 - **wake-lock** — the screen lock is taken on start, not stacked, not requested
   while hidden, re-taken on return, and a refusal is only a warning.
 - **sidebar** — a sidebar folded away before a reload starts folded.
