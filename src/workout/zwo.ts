@@ -7,6 +7,9 @@ const FRACTION_CEILING = 6;
 
 interface ParseContext { ftp: number; }
 
+/** Name given to a workout whose file has no `<name>`. */
+export const UNTITLED_WORKOUT = 'Untitled workout';
+
 function num(el: Element, ...names: string[]): number | undefined {
   for (const n of names) {
     const raw = el.getAttribute(n);
@@ -146,7 +149,7 @@ export function parseZwo(xml: string, ctx: ParseContext): Workout {
   if (segments.length === 0) throw new Error('Workout contains no usable blocks');
 
   return {
-    name: text(doc, 'name') ?? 'Untitled workout',
+    name: text(doc, 'name') ?? UNTITLED_WORKOUT,
     author: text(doc, 'author'),
     description: text(doc, 'description'),
     sport: text(doc, 'sportType') ?? 'bike',

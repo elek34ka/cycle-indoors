@@ -7,6 +7,8 @@ import { strava, StravaNotConnected, type UploadResult } from '../activity/strav
 import { clear, el, qs, toast } from './dom';
 import { confirmDialog } from './confirm';
 import { connectStrava } from './strava-panel';
+import { entryFor, type LoadedEntry } from '../library/loaded';
+import type { PersonalLibrary } from '../library/personal';
 
 /** Strava uploads by ride start time, so reopening a summary neither repeats
  *  an upload nor loses track of one still in flight. */
@@ -27,7 +29,35 @@ export function hideSummary(): void {
   qs('#summary-overlay').classList.add('hidden');
 }
 
-export function showSummary(snapshot: SessionSnapshot): void {
+/** Offers to mark the ridden workout done. Never marks it by itself: the
+ *  rider decides, whether or not the workout ran to its end. */
+function markDoneRow(entry: LoadedEntry, personal: PersonalLibrary): HTMLElement {
+  const button = el('button', {
+    class: 'btn summary-mark-done',
+    text: `Mark "${entry.title}" as done`,
+    on: {
+      click: async () => {
+        button.disabled = true;
+        try {
+          await personal.setDone(entry.key, true);
+          button.textContent = `"${entry.title}" is marked done`;
+        } catch (err) {
+          button.disabled = false;
+          toast(`Could not save the done mark: ${(err as Error).message}`, 'error');
+        }
+      },
+    },
+  }) as HTMLButtonElement;
+  const note = el('span', { class: 'summary-done-note' });
+  void personal.available().then((ok) => {
+    if (ok) return;
+    button.disabled = true;
+    note.textContent = 'Done marks cannot be saved in this browser.';
+  });
+  return el('div', { class: 'summary-done' }, [button, note]);
+}
+
+export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrary): void {
   const overlay = qs('#summary-overlay');
   clear(overlay);
 
@@ -102,6 +132,9 @@ export function showSummary(snapshot: SessionSnapshot): void {
       },
     },
   });
+
+  const entry = entryFor(snapshot.workout);
+  if (entry && personal) card.append(markDoneRow(entry, personal));
 
   card.append(el('div', { class: 'summary-actions' }, [
     el('button', { class: 'btn btn-ghost', text: 'Keep ride open', on: { click: hideSummary } }),

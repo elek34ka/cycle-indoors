@@ -10,6 +10,8 @@ import {
 import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
+import type { PersonalLibrary } from '../library/personal';
+import { rememberEntry, type LoadedEntry } from '../library/loaded';
 import { blockLabel } from '../workout/targets';
 import type { Workout } from '../workout/types';
 import { clear, el, qs, setClass, setParts, setText, toast, type SubPart } from './dom';
@@ -17,6 +19,10 @@ import { confirmDialog } from './confirm';
 import { ElevationGraph } from './elevation-graph';
 import { MiniMap } from './mini-map';
 import { ProfileGraph } from './profile-graph';
+
+/** Where a loaded file came from: picked or dropped by the rider, the
+ *  published catalog, or the rider's own library in the browser. */
+export type LoadOrigin = 'file' | 'catalog' | 'mine';
 
 /** One row of a tile's right-hand column: plain text, or parts with the
  *  numbers emphasised. */
@@ -173,7 +179,11 @@ export class RideView {
   private followInput!: HTMLInputElement;
   private currentMessage: string | undefined;
 
-  constructor(private onFinished: (snapshot: SessionSnapshot) => void) {
+  constructor(
+    private onFinished: (snapshot: SessionSnapshot) => void,
+    /** where files the rider loads are kept; none in some tests */
+    private personal?: PersonalLibrary,
+  ) {
     this.messageNode = qs('#graph-message');
     this.intervalBar = qs('#interval-bar');
     this.controls = qs('#controls');
@@ -207,7 +217,7 @@ export class RideView {
 
     this.bindKeys();
     this.applySidebar(settings.current.showSidebar);
-    this.loadLibraryWorkout(LIBRARY[0].id);
+    this.loadBuiltin(LIBRARY[0].id);
     this.onCourseChanged(undefined);
   }
 
@@ -365,20 +375,11 @@ export class RideView {
   }
 
   private buildWorkoutPanel(): void {
-    const select = qs<HTMLSelectElement>('#library-select');
-    clear(select);
-    select.append(el('option', { value: '', text: 'Workout library…' }));
-    for (const entry of LIBRARY) {
-      select.append(el('option', { value: entry.id, text: `${entry.title} — ${entry.summary.split(' · ')[0]}` }));
-    }
-    select.addEventListener('change', () => {
-      if (select.value) this.loadLibraryWorkout(select.value);
-    });
-    this.attachLoader('pick-workout', 'workout-drop', '.zwo,.fit,.xml', (file) => void this.loadFromFile(file));
+    this.attachLoader('pick-workout', 'workout-drop', '.zwo,.fit,.xml', (file) => void this.loadFromSource(file, 'file'));
   }
 
   private buildRoutePanel(): void {
-    this.attachLoader('pick-route', 'route-drop', '.gpx,.fit', (file) => void this.loadFromFile(file));
+    this.attachLoader('pick-route', 'route-drop', '.gpx,.fit', (file) => void this.loadFromSource(file, 'file'));
   }
 
   private bindKeys(): void {
@@ -426,25 +427,38 @@ export class RideView {
 
   // ---- loading -------------------------------------------------------------
 
-  private loadLibraryWorkout(id: string): void {
+  /**
+   * A built-in workout, by id. Synchronous, unlike every other source, so the
+   * ride screen boots with a workout already in place. Returns whether it
+   * loaded.
+   */
+  loadBuiltin(id: string): boolean {
     const entry = LIBRARY.find((e) => e.id === id);
-    if (!entry) return;
+    if (!entry) return false;
     try {
       const workout = parseZwo(entry.zwo, { ftp: settings.current.ftp });
       workout.source = 'builtin';
+      rememberEntry(workout, { key: `builtin:${id}`, title: entry.title });
       session.loadWorkout(workout);
-      qs<HTMLSelectElement>('#library-select').value = id;
+      return true;
     } catch (err) {
       toast(`Could not load "${entry.title}": ${(err as Error).message}`, 'error');
+      return false;
     }
   }
 
-  async loadFromFile(file: File): Promise<void> {
+  /**
+   * Loads a workout and/or route from a file, whichever source its bytes came
+   * from — a file the rider picked, the catalog, or My library — so every
+   * source parses alike. Returns whether anything was loaded; on failure the
+   * ride's workout and route are left as they were.
+   */
+  async loadFromSource(file: File, origin: LoadOrigin, entry?: LoadedEntry): Promise<boolean> {
     try {
       const result = await loadFile(file, { ftp: settings.current.ftp });
+      if (result.workout && entry) rememberEntry(result.workout, entry);
       if (result.workout) {
         session.loadWorkout(result.workout);
-        qs<HTMLSelectElement>('#library-select').value = '';
         toast(`Loaded "${result.workout.name}" — ${hhmmss(result.workout.duration)}`);
       }
       if (result.track) {
@@ -455,9 +469,26 @@ export class RideView {
           toast('Loaded, but this ride has no GPS positions — indoor rides have no route.');
         }
       }
-      if (!result.workout && !result.track) toast('Nothing usable in that file.', 'error');
+      if (!result.workout && !result.track) {
+        toast('Nothing usable in that file.', 'error');
+        return false;
+      }
+      // A file from disk is kept in My library; one that came from there or
+      // from the catalog already has a home.
+      if (origin === 'file' && this.personal) {
+        const kept = await this.personal.keep(file, result);
+        // Now it is a My library entry, and can be marked done after the ride.
+        if (result.workout && kept.sha256) {
+          rememberEntry(result.workout, { key: `mine:${kept.sha256}`, title: kept.workoutTitle ?? result.workout.name });
+        }
+        if (kept.outcome === 'unavailable' || kept.outcome === 'failed') {
+          toast('Loaded, but it could not be saved to My library — browser storage is unavailable or full.', 'error');
+        }
+      }
+      return true;
     } catch (err) {
-      toast((err as Error).message, 'error');
+      toast(origin === 'file' ? (err as Error).message : `Could not load it: ${(err as Error).message}`, 'error');
+      return false;
     }
   }
 

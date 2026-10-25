@@ -82,9 +82,8 @@ suite('boot', () => {
     doc.querySelector('#workout-meta h3')?.textContent ?? 'none');
   check('the segment list is populated', doc.querySelectorAll('#segment-list li').length === 11,
     `got ${doc.querySelectorAll('#segment-list li').length}`);
-  check('the library select lists every workout plus its placeholder',
-    doc.querySelectorAll('#library-select option').length === LIBRARY.length + 1,
-    `${doc.querySelectorAll('#library-select option').length} options for ${LIBRARY.length} workouts`);
+  check('the workout drop-down is gone', doc.querySelector('#library-select') === null);
+  check('a Browse library button takes its place', doc.querySelector('#workout-drop + #browse-library') !== null);
   check('the simulator is off by default', simulatorDefault === false);
   check('the workout graph has a canvas', doc.querySelector('#profile') !== null);
 });
@@ -114,7 +113,7 @@ suite('the sidebar can be folded away', () => {
   press('w', { ctrlKey: true });
   press('w', { metaKey: true });
   check('Ctrl/Cmd+W are left to the browser', view.classList.contains('sidebar-hidden'));
-  press('w', {}, doc.querySelector('#library-select')!);
+  press('w', {}, doc.querySelector('#controls input')!);
   check('typing in a field does not toggle it', view.classList.contains('sidebar-hidden'));
   press('w');
   check('and it can be shown again', !view.classList.contains('sidebar-hidden'));
@@ -518,8 +517,8 @@ suite('a dragged map still belongs to the ride view', () => {
 
 suite('tabs and the devices panel', () => {
   const tabs = [...doc.querySelectorAll<HTMLButtonElement>('#tabs button')];
-  check('there are three tabs: Ride, Devices, Settings',
-    tabs.map((b) => b.textContent).join(',') === 'Ride,Devices,Settings', tabs.map((b) => b.textContent).join(','));
+  check('there are four tabs: Ride, Library, Devices, Settings',
+    tabs.map((b) => b.textContent).join(',') === 'Ride,Library,Devices,Settings', tabs.map((b) => b.textContent).join(','));
   doc.querySelector<HTMLButtonElement>('#tabs button[data-tab="settings"]')?.click();
   check('the settings view became active', doc.querySelector('#view-settings')?.classList.contains('active'));
   check('the ride view is hidden', !doc.querySelector('#view-ride')?.classList.contains('active'));

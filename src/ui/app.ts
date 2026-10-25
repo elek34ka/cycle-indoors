@@ -4,7 +4,11 @@ import { restorePairedDevices } from '../devices/ble/pair';
 import { settings } from '../core/settings';
 import { keepScreenAwake } from '../core/wake-lock';
 import { session } from '../session/session';
+import { CatalogClient } from '../catalog/client';
+import { openLibraryStore, type LibraryStore } from '../library/db';
+import { PersonalLibrary } from '../library/personal';
 import { DevicesView } from './devices-view';
+import { LibraryView } from './library-view';
 import { RideView } from './ride-view';
 import { RouteSmootherView } from './route-smoother-view';
 import { buildSettingsView } from './settings-view';
@@ -12,10 +16,19 @@ import { buildStravaPanel } from './strava-panel';
 import { showSummary } from './summary';
 import { qs, toast } from './dom';
 
-type TabName = 'ride' | 'devices' | 'settings';
+type TabName = 'ride' | 'library' | 'devices' | 'settings';
 
-export function bootApp(): void {
-  new RideView((snapshot) => showSummary(snapshot));
+export interface BootOptions {
+  /** the published catalog; tests pass one with a stand-in fetch */
+  catalog?: CatalogClient;
+  /** My library's storage; tests pass one over a stand-in IndexedDB */
+  store?: Promise<LibraryStore>;
+}
+
+export function bootApp(options: BootOptions = {}): void {
+  // Opens in the background: nothing at boot waits for IndexedDB.
+  const personal = new PersonalLibrary(options.store ?? openLibraryStore());
+  const rideView = new RideView((snapshot) => showSummary(snapshot, personal), personal);
   buildSettingsView();
   buildStravaPanel();
   new RouteSmootherView();
@@ -31,10 +44,22 @@ export function bootApp(): void {
     }
     // the panel toggle only means something on the ride view
     qs('#toggle-sidebar').classList.toggle('hidden', name !== 'ride');
+    if (name === 'library') library.open();
   };
+  // The catalog is fetched when the Library opens, never here: boot must not
+  // wait on the network.
+  const library = new LibraryView(qs('#library-root'), {
+    loadBuiltin: (id) => rideView.loadBuiltin(id),
+    loadFile: (file, origin, entry) => rideView.loadFromSource(file, origin, entry),
+    showRide: () => show('ride'),
+  }, options.catalog, personal);
   tabs.addEventListener('click', (e) => {
     const button = (e.target as HTMLElement).closest('button');
     if (button?.dataset.tab) show(button.dataset.tab as TabName);
+  });
+  qs('#browse-library').addEventListener('click', () => {
+    library.setSection('workouts');
+    show('library');
   });
 
   void bootDevices();
