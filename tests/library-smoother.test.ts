@@ -2,7 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { setupDom } from './dom-setup';
 const dom = setupDom();
 
-const { check, report, suite } = await import('./harness');
+const { check, report, suite, until } = await import('./harness');
 const { bootApp } = await import('../src/ui/app');
 const { session } = await import('../src/session/session');
 const { settings } = await import('../src/core/settings');
@@ -91,7 +91,9 @@ const HILLY = `catalog:${hilly.id}`;
 drop('route-drop', 'my-hilly.gpx', MINE);
 await settle();
 const rideCourse = courseStore.current;
-const mineKey = `mine:${(await kept())[0].sha256}`;
+const [mine] = await until(kept, (k) => k.length > 0);
+if (!mine) throw new Error('the dropped route was never kept in My library');
+const mineKey = `mine:${mine.sha256}`;
 
 tab('library').click();
 await settle();

@@ -2,7 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { setupDom } from './dom-setup';
 const dom = setupDom();
 
-const { check, report, suite } = await import('./harness');
+const { check, report, suite, until } = await import('./harness');
 const { bootApp } = await import('../src/ui/app');
 const { session } = await import('../src/session/session');
 const { settings } = await import('../src/core/settings');
@@ -57,7 +57,7 @@ drop('route-drop', 'hilly.gpx', GPX);
 await settle();
 drop('workout-drop', 'my_steady.zwo', STEADY);
 await settle();
-const afterDrops = await kept();
+const afterDrops = await until(kept, (k) => k.length === 2);
 drop('workout-drop', 'broken.zwo', '<workout_file><workout>');
 await settle();
 const brokenToast = lastToast();
@@ -139,7 +139,7 @@ doc.querySelector<HTMLButtonElement>('#library-root .lib-detail .lib-remove')!.c
 await settle();
 Array.from(doc.querySelectorAll<HTMLButtonElement>('.confirm-overlay button')).find((b) => b.textContent === 'Remove')!.click();
 await settle();
-const afterRemove = await kept();
+const afterRemove = await until(kept, (k) => k.length === 1);
 
 suite('removing an entry', () => {
   check('the loaded route came from the drop', loadedCourse !== undefined);
