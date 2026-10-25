@@ -21,6 +21,8 @@ const frame = () => new Promise((resolve) => dom.window.requestAnimationFrame(()
 
 const sampleXml = readFileSync('samples/sample-hilly-loop.gpx', 'utf8');
 const sampleTrack = parseGpx(sampleXml, 'sample');
+const WORKOUT_ZWO = '<workout_file><name>W</name><workout><SteadyState Duration="60" Power="0.5"/></workout></workout_file>';
+const FLAT_GPX = '<gpx><trk><trkseg><trkpt lat="50" lon="19"></trkpt><trkpt lat="50.01" lon="19"></trkpt></trkseg></trk></gpx>';
 
 /** Drop a file on the smoother the way a rider would, and let it load. */
 async function drop(name: string, content: string): Promise<void> {
@@ -98,7 +100,7 @@ suite('the map', () => {
 const loadedView = view.previewMap.viewState!;
 const loadedColours = mapColours();
 const before = view.current;
-await drop('workout.zwo', '<workout_file><name>W</name><workout><SteadyState Duration="60" Power="0.5"/></workout></workout_file>');
+await drop('workout.zwo', WORKOUT_ZWO);
 suite('refusing what is not a route', () => {
   check('a workout is refused as not a route', lastToast().includes('is not a route'), lastToast());
   check('the previous route stays', view.current === before);
@@ -107,7 +109,7 @@ suite('refusing what is not a route', () => {
     && state.zoom === loadedView.zoom);
 });
 
-await drop('flat.gpx', '<gpx><trk><trkseg><trkpt lat="50" lon="19"></trkpt><trkpt lat="50.01" lon="19"></trkpt></trkseg></trk></gpx>');
+await drop('flat.gpx', FLAT_GPX);
 suite('refusing a route without elevation', () => {
   check('it says there is no elevation', lastToast() === 'This route has no elevation to smooth', lastToast());
   check('the previous route stays', view.current === before);
@@ -244,9 +246,68 @@ suite('riding it', () => {
   near('it is the same length as the original', course.totalDistance, sampleTrack.distance, 1);
 });
 
+// A second smoother on the same page, as the Library has: no picker, its own
+// ids, and a hook after Ride this route.
+const otherHost = doc.createElement('div');
+doc.body.append(otherHost);
+let rides = 0;
+const other = new RouteSmootherView(otherHost, {
+  idPrefix: 'other', filePicker: false, heading: 'Smooth this route', onRide: () => { rides++; },
+});
+const otherPreset = () => doc.querySelector<HTMLSelectElement>('#other-preset')!;
+const tableText = (id: string) => [...doc.querySelectorAll(`#${id}-table > span`)].map((c) => c.textContent).join('|');
+const choose = (select: HTMLSelectElement, value: string) => {
+  select.value = value;
+  select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+};
+
+const refusedWorkout = await other.load(new File([WORKOUT_ZWO], 'workout.zwo'));
+const refusedFlat = await other.load(new File([FLAT_GPX], 'flat.gpx'));
+const accepted = await other.load(new File([sampleXml], 'sample-hilly-loop.gpx'));
+await wait(150);
+
+suite('load reports what happened', () => {
+  check('false for a workout', refusedWorkout === false);
+  check('false for a route without elevation', refusedFlat === false);
+  check('true for a route it previews', accepted === true && other.current !== undefined);
+});
+
+suite('a second smoother', () => {
+  check('has no file picker or drop zone', otherHost.querySelector('input[type=file], .drop-zone') === null);
+  check('adds no hidden input to the page', doc.querySelectorAll('body > input[type=file]').length === 1);
+  check('has ids of its own', doc.querySelector('#other-preset') !== null && doc.querySelectorAll('#smoother-preset').length === 1);
+  check('has its own heading', otherHost.querySelector('h2')?.textContent === 'Smooth this route');
+  check('starts with the saved values', otherPreset().value === 'custom' && settings.current.routeSmoothing.maxGradient === 9
+    && otherHost.querySelector<HTMLInputElement>('input[data-param="maxGradient"]')?.value === '9');
+  check('shows the same figures for the same route', tableText('other') === tableText('smoother'), tableText('other'));
+});
+
+choose(preset(), 'strong');
+await frame();
+await frame();
+suite('one set of parameters', () => {
+  check('Strong chosen in one shows in the other', otherPreset().value === 'strong'
+    && otherHost.querySelector<HTMLInputElement>('input[data-param="window"]')?.value === String(PRESETS.strong.window));
+  check('and both previews use it', other.current?.params.window === PRESETS.strong.window
+    && view.current?.params.window === PRESETS.strong.window);
+  check('so the figures still match', tableText('other') === tableText('smoother'));
+});
+choose(otherPreset(), 'light');
+await frame();
+suite('…in both directions', () => {
+  check('Light chosen in the second shows in the first', preset().value === 'light' && settings.current.routeSmoothing.preset === 'light');
+});
+
+suite('Ride this route calls back', () => {
+  doc.querySelector<HTMLButtonElement>('#other-ride')!.click();
+  check('once', rides === 1, String(rides));
+  check('after the course is loaded', courseStore.current?.name === 'Sample hilly loop (smoothed)');
+});
+
 suite('reset to defaults', () => {
   settings.reset();
   check('the smoother goes back to Medium', preset().value === 'medium' && input('window').value === String(PRESETS.medium.window));
+  check('and so does the second', otherPreset().value === 'medium');
 });
 
 session.reset();

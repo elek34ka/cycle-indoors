@@ -23,6 +23,7 @@ import { confirmDialog } from './confirm';
 import { clear, el, toast } from './dom';
 import { routeProfileSvg, workoutProfileSvg } from './library-profile';
 import type { LoadOrigin } from './ride-view';
+import { RouteSmootherView } from './route-smoother-view';
 
 /** What the Library needs from the rest of the app to put an entry on the ride. */
 export interface LibraryHost {
@@ -87,6 +88,12 @@ export class LibraryView {
   private listNode: HTMLElement;
   private detailNode: HTMLElement;
   private tagSelect: HTMLSelectElement | undefined;
+  /** the route smoother, built on the first Smooth and then moved between
+   *  details, so a re-render keeps its charts, hover and map view */
+  private smoother: { host: HTMLElement; view: RouteSmootherView } | undefined;
+  /** the route it is open on; nothing else shows it */
+  private smoothKey: string | undefined;
+  private smoothLoadingKey: string | undefined;
 
   constructor(
     private readonly root: HTMLElement,
@@ -428,11 +435,15 @@ export class LibraryView {
   private renderDetail(): void {
     clear(this.detailNode);
     const key = this.selected[this.section];
+    if (this.section !== 'routes') this.closeSmoother();
     if (this.section === 'workouts') {
       const w = this.workouts().find((x) => x.key === key);
       if (w) { this.workoutDetail(w); return; }
     } else if (this.section === 'routes') {
       const r = this.routes().find((x) => x.key === key);
+      if (r && r.key === this.smoothKey) { this.routeDetail(r); return; }
+      // Another route, or this one is gone: the smoother is closed.
+      this.closeSmoother();
       if (r) { this.routeDetail(r); return; }
     } else {
       const p = this.plans().find((x) => `catalog:${x.id}` === key);
@@ -477,6 +488,7 @@ export class LibraryView {
     const row = el('div', { class: 'lib-actions' }, [this.rideButton(item.key, () => void this.ride(item, title), true)]);
     // Routes are not workouts: only workouts are marked done.
     if ('title' in item) row.append(this.doneToggle(item.key));
+    else row.append(this.smoothButton(item));
     if ('title' in item && !this.canMark) {
       row.append(el('span', { class: 'lib-done-note', text: 'Done marks cannot be saved in this browser.' }));
     }
@@ -496,7 +508,21 @@ export class LibraryView {
       this.tags(r.source, r.tags),
       routeProfileSvg(r.profile, 600, 96, 'lib-profile-large'),
       this.actions(r, r.name),
+      r.key === this.smoothKey ? this.smoother?.host ?? null : null,
     );
+  }
+
+  /** Smooth while closed, Close smoother while open on this route. Not tied
+   *  to the ride: only the smoother's own Ride this route is. */
+  private smoothButton(r: RouteItem): HTMLButtonElement {
+    const open = r.key === this.smoothKey;
+    const loading = r.key === this.smoothLoadingKey;
+    return el('button', {
+      type: 'button', class: 'btn lib-smooth', dataset: { key: r.key },
+      text: loading ? 'Loading…' : open ? 'Close smoother' : 'Smooth',
+      disabled: this.smoothLoadingKey !== undefined,
+      on: { click: () => void this.smooth(r) },
+    }) as HTMLButtonElement;
   }
 
   /** The plan's workouts in order, under a heading wherever the sub-folder
@@ -613,25 +639,78 @@ export class LibraryView {
 
   // ---- loading -------------------------------------------------------------
 
+  /** An entry's file: the kept copy from My library, or the catalog's,
+   *  checked against the index. Ride and Smooth both read files this way. */
+  private async entryBytes(item: WorkoutItem | RouteItem): Promise<Uint8Array> {
+    if (item.source === 'mine') {
+      const kept = await this.personal?.file(item.id);
+      if (!kept) throw new Error('it is no longer in My library');
+      return kept.bytes;
+    }
+    if (!item.file) throw new Error('the catalog does not list its file');
+    return this.client.fetchFile(item.file);
+  }
+
+  /** Opens the smoother on a route, or closes it if it is open there. */
+  private async smooth(r: RouteItem): Promise<void> {
+    if (r.key === this.smoothKey) {
+      this.closeSmoother();
+      this.renderDetail();
+      return;
+    }
+    if (this.smoothLoadingKey !== undefined || !r.fileName) return;
+    this.smoothLoadingKey = r.key;
+    this.renderDetail();
+    try {
+      const bytes = await this.entryBytes(r);
+      // The rider may have moved on while the file was on its way.
+      if (this.section !== 'routes' || this.selected.routes !== r.key) return;
+      const smoother = this.ensureSmoother();
+      // Shown before the route arrives, so the map frames it at its real size.
+      this.smoothKey = r.key;
+      this.renderDetail();
+      if (!await smoother.view.load(new File([bytes as BlobPart], r.fileName))) this.closeSmoother();
+    } catch (err) {
+      toast(`Could not smooth "${r.name}": ${(err as Error).message}`, 'error');
+    } finally {
+      this.smoothLoadingKey = undefined;
+      this.renderDetail();
+    }
+  }
+
+  private ensureSmoother(): { host: HTMLElement; view: RouteSmootherView } {
+    if (!this.smoother) {
+      const host = el('div', { class: 'lib-smoother', id: 'lib-smoother' });
+      const view = new RouteSmootherView(host, {
+        idPrefix: 'lib-smoother',
+        filePicker: false,
+        heading: 'Smooth this route',
+        intro: 'Takes the jitter and the sudden ramps out of the route’s elevation. The settings are the same as '
+          + 'in Settings → Route smoother. The route on the ride is not changed until you press Ride this route.',
+        onRide: () => this.host.showRide(),
+      });
+      this.smoother = { host, view };
+    }
+    return this.smoother;
+  }
+
+  private closeSmoother(): void {
+    if (this.smoothKey === undefined) return;
+    this.smoothKey = undefined;
+    this.smoother?.view.unload();
+  }
+
   private async ride(item: WorkoutItem | RouteItem, title: string): Promise<void> {
     if (this.rideLocked() || this.loadingKey !== undefined) return;
     if (item.source === 'builtin') {
       if (this.host.loadBuiltin(item.id)) this.host.showRide();
       return;
     }
-    if (!item.fileName) return;
+    if (!item.fileName || (item.source === 'catalog' && !item.file)) return;
     this.loadingKey = item.key;
     this.renderRideState();
     try {
-      let bytes: Uint8Array;
-      if (item.source === 'mine') {
-        const kept = await this.personal?.file(item.id);
-        if (!kept) throw new Error('it is no longer in My library');
-        bytes = kept.bytes;
-      } else {
-        if (!item.file) return;
-        bytes = await this.client.fetchFile(item.file);
-      }
+      const bytes = await this.entryBytes(item);
       // A ride may have started while the file was on its way.
       if (this.rideLocked()) throw new Error('a ride started in the meantime');
       const loaded = await this.host.loadFile(new File([bytes as BlobPart], item.fileName), item.source === 'mine' ? 'mine' : 'catalog',

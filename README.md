@@ -317,6 +317,11 @@ smoothed height, and no times or sensor data, because it is a course and not a
 ride. **Ride this route** makes it the ride's course straight away. It is
 unavailable while a ride is running or paused.
 
+The same smoother opens on any route in the Library (**Smooth** in its
+details), without a file picker of its own. Both share one set of
+parameters: a preset chosen in one is the preset in the other, and Reset to
+defaults resets both.
+
 **Strava upload.** A **Strava** panel on the Settings tab connects the
 browser to a Strava account, shows who is connected, holds an **Upload
 automatically when I finish** toggle (off by default) and a **Disconnect**
@@ -366,7 +371,15 @@ Workouts.
   Descriptions come from other people's files, so they are always shown as
   plain text, never as HTML, with their line breaks kept.
 - **Routes** show their distance, metres climbed and an elevation
-  thumbnail.
+  thumbnail. A route's details offer **Smooth** next to Ride. It fetches the
+  file the same way Ride does, hash check included, and opens the full Route
+  smoother (see Settings below) in the details, on that route: presets,
+  Advanced, charts, map, table, Download and Ride this route. Ride this route
+  makes the smoothed route the course and switches to the Ride tab. The
+  smoothed route is not kept in My library. Smooth works mid-ride, and only
+  Ride this route is disabled then. One route is open at a time. Selecting
+  another entry, changing section or removing the route closes it, and
+  **Close smoother** does so by hand.
 - **Plans** show their number of workouts, hours and TSS. Selecting one
   lists its workouts in order under their sub-folder headings, each with a
   Ride button. Search matches a plan's title and its workouts' titles.
@@ -746,6 +759,22 @@ the bucket does not exist yet, or Wrangler's login has no R2 access
   After one, the map frames the whole route, keeps its view through a refused
   file and a preset change while recolouring the line, puts a marker where a
   chart is hovered, and fills the readout when its line is hovered.
+  A second smoother on the same page, as the Library builds it, has no picker
+  and its own ids, and shares the parameters both ways. Its figures match the
+  first's for the same route, it calls back after Ride this route, and Reset
+  to defaults resets it too. `load` reports whether a route is now previewed.
+- **library-smoother** — Smooth on Library routes, in the booted app with a
+  stand-in catalog and IndexedDB. Covered: a failed download, a hash
+  mismatch and a route without elevation, each refused with the reason and
+  no smoother. A catalog route fetched by its hash key shows the full
+  smoother, the same figures as Settings, and no picker, while the ride's
+  course stays as it was. The smoother stays open through a preset change
+  (which Settings follows) and through a filter. It closes on another route,
+  on a section change and on removal. A My library route opens with no
+  request, and a file that arrives after the rider has moved on is dropped.
+  Mid-ride, Smooth works and Ride this route is disabled even against a
+  forced click. Ride this route switches to the Ride tab with the smoothed
+  course and keeps nothing in My library.
 - **route-geometry** — the pure helpers behind the smoother's map: a position
   at a distance clamps and interpolates, the nearest distance to a point maps
   50 places on the sample route back to themselves within 1 m and a point

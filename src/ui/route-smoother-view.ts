@@ -18,6 +18,22 @@ import { RoutePreviewMap } from './route-preview-map';
 
 type Stored = SmoothingParams & { preset: SmoothingPreset };
 
+/** Where the smoother is shown. The defaults are the Settings smoother. */
+export interface RouteSmootherOptions {
+  /** prefix of every element id, so two smoothers can share a page */
+  idPrefix?: string;
+  /** a file picker and drop zone of its own; without one, routes arrive by `load` */
+  filePicker?: boolean;
+  heading?: string;
+  intro?: string;
+  /** after Ride this route has made the smoothed route the ride's course */
+  onRide?: () => void;
+}
+
+const SETTINGS_INTRO = 'Takes the jitter and the sudden ramps out of a route’s elevation, so the gradient a trainer '
+  + 'follows changes gently. Load a route, compare the result with the original, then download it '
+  + 'as a .gpx or ride it.';
+
 const PADDING = { top: 12, right: 14, bottom: 22, left: 52 };
 /** The gradient chart's y-range covers both traces, but raw GPS can produce a
  *  ±80% blip that would squash everything else flat; nothing ridable is
@@ -82,10 +98,11 @@ class ChartCanvas {
 }
 
 /**
- * Settings → Route smoother. Loads a route of its own, shows what smoothing
- * does to it against the original, and hands the result on as a GPX download
- * or as the ride's course. The ride's course is not touched until the rider
- * asks for that.
+ * The route smoother, in Settings and on a Library route. Loads a route of its
+ * own, shows what smoothing does to it against the original, and hands the
+ * result on as a GPX download or as the ride's course. The ride's course is
+ * not touched until the rider asks for that. Every instance reads and writes
+ * the same saved parameters, so they all stay in step.
  */
 export class RouteSmootherView {
   private track: ActivityTrack | undefined;
@@ -113,31 +130,13 @@ export class RouteSmootherView {
   private readonly elevationChart: ChartCanvas;
   private readonly gradientChart: ChartCanvas;
   private readonly map: RoutePreviewMap;
+  private readonly onRide: () => void;
 
-  constructor(host: HTMLElement = qs('#smoother-panel')) {
-    const picker = el('input', { type: 'file', attrs: { accept: '.gpx,.fit' } }) as HTMLInputElement;
-    picker.style.display = 'none';
-    picker.addEventListener('change', () => {
-      const file = picker.files?.[0];
-      if (file) void this.load(file);
-      picker.value = '';
-    });
+  constructor(host: HTMLElement = qs('#smoother-panel'), options: RouteSmootherOptions = {}) {
+    const id = options.idPrefix ?? 'smoother';
+    this.onRide = options.onRide ?? (() => {});
 
-    const drop = el('div', { class: 'drop-zone', id: 'smoother-drop' }, [
-      el('strong', { text: 'Drop a .gpx or .fit route' }),
-      el('span', { text: 'its own copy: the ride’s route is not changed' }),
-    ]);
-    const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
-    drop.addEventListener('dragover', (e) => { stop(e); drop.classList.add('over'); });
-    drop.addEventListener('dragleave', (e) => { stop(e); drop.classList.remove('over'); });
-    drop.addEventListener('drop', (e) => {
-      stop(e);
-      drop.classList.remove('over');
-      const file = (e as DragEvent).dataTransfer?.files?.[0];
-      if (file) void this.load(file);
-    });
-
-    this.presetSelect = el('select', { class: 'select', id: 'smoother-preset' }) as HTMLSelectElement;
+    this.presetSelect = el('select', { class: 'select', id: `${id}-preset` }) as HTMLSelectElement;
     for (const preset of ['light', 'medium', 'strong', 'custom'] as SmoothingPreset[]) {
       this.presetSelect.append(el('option', { value: preset, text: PRESET_LABELS[preset] }));
     }
@@ -158,27 +157,27 @@ export class RouteSmootherView {
       ]));
     }
 
-    this.source = el('div', { class: 'smoother-source', id: 'smoother-source' });
-    this.warning = el('p', { class: 'hint hint-warn', id: 'smoother-warning' });
+    this.source = el('div', { class: 'smoother-source', id: `${id}-source` });
+    this.warning = el('p', { class: 'hint hint-warn', id: `${id}-warning` });
     this.warning.hidden = true;
-    this.table = el('div', { class: 'smoother-table', id: 'smoother-table' });
-    this.readout = el('div', { class: 'smoother-readout', id: 'smoother-readout' });
+    this.table = el('div', { class: 'smoother-table', id: `${id}-table` });
+    this.readout = el('div', { class: 'smoother-readout', id: `${id}-readout` });
 
-    const elevationCanvas = el('canvas', { id: 'smoother-elevation' }) as HTMLCanvasElement;
-    const gradientCanvas = el('canvas', { id: 'smoother-gradient' }) as HTMLCanvasElement;
+    const elevationCanvas = el('canvas', { id: `${id}-elevation` }) as HTMLCanvasElement;
+    const gradientCanvas = el('canvas', { id: `${id}-gradient` }) as HTMLCanvasElement;
     const elevationBox = el('div', { class: 'smoother-chart' }, [elevationCanvas]);
     const gradientBox = el('div', { class: 'smoother-chart' }, [gradientCanvas]);
-    const mapBox = el('div', { class: 'smoother-map', id: 'smoother-map' });
+    const mapBox = el('div', { class: 'smoother-map', id: `${id}-map` });
 
     this.downloadButton = el('button', {
-      class: 'btn', id: 'smoother-download', text: 'Download smoothed .gpx', disabled: true,
+      class: 'btn', id: `${id}-download`, text: 'Download smoothed .gpx', disabled: true,
       on: { click: () => this.download() },
     }) as HTMLButtonElement;
     this.rideButton = el('button', {
-      class: 'btn btn-primary', id: 'smoother-ride', text: 'Ride this route', disabled: true,
+      class: 'btn btn-primary', id: `${id}-ride`, text: 'Ride this route', disabled: true,
       on: { click: () => this.ride() },
     }) as HTMLButtonElement;
-    this.rideHint = el('span', { class: 'suffix', id: 'smoother-ride-hint' });
+    this.rideHint = el('span', { class: 'suffix smoother-ride-hint', id: `${id}-ride-hint` });
 
     this.body = el('div', { class: 'smoother-body' }, [
       this.source,
@@ -200,17 +199,11 @@ export class RouteSmootherView {
 
     clear(host);
     host.append(
-      el('h2', { text: 'Route smoother' }),
-      el('p', {
-        class: 'hint',
-        text: 'Takes the jitter and the sudden ramps out of a route’s elevation, so the gradient a trainer '
-          + 'follows changes gently. Load a route, compare the result with the original, then download it '
-          + 'as a .gpx or ride it.',
-      }),
-      el('div', { class: 'smoother-load' }, [
-        drop,
-        el('button', { class: 'btn btn-small', text: 'Load file', on: { click: () => picker.click() } }),
-      ]),
+      el('h2', { text: options.heading ?? 'Route smoother' }),
+      el('p', { class: 'hint', text: options.intro ?? SETTINGS_INTRO }),
+    );
+    if (options.filePicker ?? true) host.append(this.filePicker(id));
+    host.append(
       el('div', { class: 'field-grid' }, [
         el('div', { class: 'field' }, [
           el('label', { text: 'Smoothing' }),
@@ -222,7 +215,6 @@ export class RouteSmootherView {
       this.body,
       el('div', { class: 'summary-actions' }, [this.rideHint, this.downloadButton, this.rideButton]),
     );
-    document.body.append(picker);
 
     this.elevationChart = new ChartCanvas(elevationCanvas, () => this.draw());
     this.gradientChart = new ChartCanvas(gradientCanvas, () => this.draw());
@@ -250,26 +242,58 @@ export class RouteSmootherView {
     this.refreshButtons();
   }
 
+  /** The drop zone and Load file button, over a hidden input in the body. */
+  private filePicker(id: string): HTMLElement {
+    const picker = el('input', { type: 'file', attrs: { accept: '.gpx,.fit' } }) as HTMLInputElement;
+    picker.style.display = 'none';
+    picker.addEventListener('change', () => {
+      const file = picker.files?.[0];
+      if (file) void this.load(file);
+      picker.value = '';
+    });
+    document.body.append(picker);
+
+    const drop = el('div', { class: 'drop-zone', id: `${id}-drop` }, [
+      el('strong', { text: 'Drop a .gpx or .fit route' }),
+      el('span', { text: 'its own copy: the ride’s route is not changed' }),
+    ]);
+    const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+    drop.addEventListener('dragover', (e) => { stop(e); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', (e) => { stop(e); drop.classList.remove('over'); });
+    drop.addEventListener('drop', (e) => {
+      stop(e);
+      drop.classList.remove('over');
+      const file = (e as DragEvent).dataTransfer?.files?.[0];
+      if (file) void this.load(file);
+    });
+
+    return el('div', { class: 'smoother-load' }, [
+      drop,
+      el('button', { class: 'btn btn-small', text: 'Load file', on: { click: () => picker.click() } }),
+    ]);
+  }
+
   get current(): SmoothedProfile | undefined { return this.profile; }
 
   get previewMap(): RoutePreviewMap { return this.map; }
 
-  async load(file: File): Promise<void> {
+  /** Previews `file`; false when it was refused, with a toast saying why. */
+  async load(file: File): Promise<boolean> {
     let track: ActivityTrack | undefined;
     try {
       track = (await loadFile(file, { ftp: settings.current.ftp })).track;
     } catch (err) {
       toast((err as Error).message, 'error');
-      return;
+      return false;
     }
     if (!track) {
       toast(`"${file.name}" is not a route: load a .gpx track or a .fit ride with GPS records`, 'error');
-      return;
+      return false;
     }
     const problem = routeProblem(track);
     if (problem) {
       toast(problem, 'error');
-      return;
+      return false;
     }
     this.track = track;
     this.points = track.points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
@@ -278,6 +302,20 @@ export class RouteSmootherView {
     this.fileBase = file.name.replace(/\.[^.]+$/, '') || 'route';
     this.hoverDistance = undefined;
     this.recompute();
+    return true;
+  }
+
+  /** Forgets the route, back to how it was before any load. */
+  unload(): void {
+    this.track = undefined;
+    this.profile = undefined;
+    this.points = [];
+    this.distances = [];
+    this.hoverDistance = undefined;
+    this.map.setHover(undefined);
+    this.body.hidden = true;
+    this.refreshButtons();
+    this.draw();
   }
 
   // ---- parameters ----------------------------------------------------------
@@ -441,6 +479,7 @@ export class RouteSmootherView {
     if (course) {
       toast(`Route "${course.name}" is now the ride’s course — ${(course.totalDistance / 1000).toFixed(1)} km, `
         + `${Math.round(course.totalAscent)} m up`);
+      this.onRide();
     }
   }
 

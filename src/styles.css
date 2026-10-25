@@ -826,7 +826,11 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .smoother-table [data-col="smoothed"] { color: var(--text); }
 .smoother-table [data-col="original"] { color: var(--text-faint); }
 .smoother-advanced .field-grid { margin-top: 4px; }
-#smoother-ride-hint { align-self: center; margin-right: auto; }
+.smoother-ride-hint { align-self: center; margin-right: auto; }
+/* The same smoother under a Library route's actions. */
+.lib-smoother { display: grid; gap: 14px; padding-top: 14px; border-top: 1px solid var(--line-soft); min-width: 0; }
+.lib-detail .lib-smoother h2 { font-size: 17px; }
+.lib-smoother .hint { color: var(--text-faint); font-size: 14px; margin: -8px 0 0; }
 
 /* ---------- library ---------- */
 
