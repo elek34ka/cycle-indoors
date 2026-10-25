@@ -569,7 +569,7 @@ input[type="number"], input[type="text"] {
 .settings-panel h2 { margin: 0; font-size: 19px; font-weight: 600; }
 .settings-panel .hint { color: var(--text-faint); font-size: 14px; margin: -8px 0 0; }
 .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.field { display: grid; gap: 5px; }
+.field { display: grid; gap: 5px; align-content: start; }
 .field label { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); font-weight: 600; }
 .field .suffix { font-size: 13px; color: var(--text-faint); }
 
