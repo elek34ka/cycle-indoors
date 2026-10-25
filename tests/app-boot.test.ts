@@ -38,6 +38,9 @@ const tile = (index: number) => {
     label: root?.querySelector('.tile-label')?.textContent ?? '',
     value: root?.querySelector('.tile-value > span')?.textContent ?? '',
     sub: root?.querySelector('.tile-sub')?.textContent ?? '',
+    /** the visible rows of the right-hand column, top to bottom */
+    rows: Array.from(root?.querySelectorAll<HTMLElement>('.tile-side .tile-sub') ?? [])
+      .filter((r) => r.style.display !== 'none').map((r) => r.textContent ?? ''),
     hidden: root?.style.display === 'none',
   };
 };
@@ -53,19 +56,18 @@ try { bootApp(); } catch (err) { bootError = err as Error; }
 suite('boot', () => {
   check('bootApp does not throw', bootError === undefined, bootError?.stack);
   check('older settings load with the map in its default corner', settings.current.miniMapPosition === null);
-  check('six metric tiles are rendered', doc.querySelectorAll('#metrics .tile').length === 6,
+  check('five metric tiles are rendered', doc.querySelectorAll('#metrics .tile').length === 5,
     `got ${doc.querySelectorAll('#metrics .tile').length}`);
-  check('in five grid cells', doc.querySelector('#metrics')?.children.length === 5,
+  check('each in its own grid cell', doc.querySelector('#metrics')?.children.length === 5,
     String(doc.querySelector('#metrics')?.children.length));
   const order = Array.from(doc.querySelectorAll('#metrics .tile-label')).map((l) => l.textContent);
-  check('Power, Target, Heart rate, Cadence, Speed, Elapsed',
-    order.join(', ') === 'Power 3s, Target, Heart rate 3s, Cadence, Speed, Elapsed', order.join(', '));
-  check('there is no Climbed tile', !order.includes('Climbed'));
-  const stack = doc.querySelector('#metrics')?.children.item(3);
-  const stacked = Array.from(stack?.querySelectorAll('.tile-label') ?? []).map((l) => l.textContent);
-  check('the fourth cell holds Cadence above Speed', stack?.classList.contains('tile-stack') === true
-    && stacked.join(' / ') === 'Cadence / Speed', stacked.join(' / '));
-  check('both are compact tiles', Array.from(stack?.children ?? []).every((t) => t.classList.contains('tile-compact')));
+  check('Power, Target, Heart rate, Cadence, Elapsed',
+    order.join(', ') === 'Power 3s, Target, Heart rate 3s, Cadence, Elapsed', order.join(', '));
+  check('there is no Climbed or Speed tile', !order.includes('Climbed') && !order.includes('Speed'));
+  check('every tile puts its value in a body row',
+    Array.from(doc.querySelectorAll('#metrics .tile')).every((t) => t.querySelector('.tile-body > .tile-value') !== null));
+  check('Elapsed is the timer alone', tile(4).root?.querySelector('.tile-side') === null
+    && tile(4).root?.classList.contains('tile-hero') === true);
   check('the elevation strip is collapsed with no route',
     doc.querySelector('#graph-stack')?.classList.contains('no-route'));
   check('the map is not offered with no route loaded',
@@ -186,10 +188,15 @@ suite('three-second, session and lap averages', () => {
   check('a lap average power is tracked', (s.lapAvgPower ?? 0) > 0, String(s.lapAvgPower));
   check('the power tile label names the smoothing window', tile(0).label === 'Power 3s', tile(0).label);
   check('the heart-rate tile label names the smoothing window', tile(2).label === 'Heart rate 3s', tile(2).label);
-  check('the power tile sub-line shows session and lap averages',
-    /avg \d+ · lap \d+/.test(tile(0).sub), tile(0).sub);
-  check('the heart-rate tile sub-line shows session and lap averages',
-    /avg \d+ · lap \d+/.test(tile(2).sub), tile(2).sub);
+  check('the power tile shows the session average over the lap average',
+    tile(0).rows.length === 2 && /^avg \d+$/.test(tile(0).rows[0]) && /^lap \d+$/.test(tile(0).rows[1]), tile(0).rows.join(' | '));
+  check('the heart-rate tile shows the session average over the lap average',
+    tile(2).rows.length === 2 && /^avg \d+$/.test(tile(2).rows[0]) && /^lap \d+$/.test(tile(2).rows[1]), tile(2).rows.join(' | '));
+  check('the cadence tile shows speed over distance',
+    tile(3).rows.length === 2 && /^\d+\.\d km\/h$/.test(tile(3).rows[0]) && /^\d+\.\d{2} km$/.test(tile(3).rows[1]),
+    tile(3).rows.join(' | '));
+  check('the cadence tile label is Cadence alone', tile(3).label === 'Cadence', tile(3).label);
+  check('the target tile shows no delta or bias', !tile(1).rows.some((r) => /bias| W\b/.test(r)), tile(1).rows.join(' | '));
 });
 
 suite('sub-lines with emphasised parts', () => {
@@ -211,14 +218,13 @@ suite('sub-lines with emphasised parts', () => {
   check('the heart-rate averages are two emphasised numbers',
     strong(2).length === 2 && strong(2).every((t) => /^\d+$/.test(t)), strong(2).join(','));
   const sessionOnly = averages(210, undefined);
-  check('a session average alone reads "avg 210"',
-    sessionOnly.map((p) => p.text).join('') === 'avg 210', sessionOnly.map((p) => p.text).join(''));
-  check('a session average alone has one strong part', sessionOnly.filter((p) => p.strong).length === 1);
-  for (const [index, name] of [[1, 'Target'], [3, 'Cadence'], [4, 'Speed'], [5, 'Elapsed']] as const) {
-    const sub = tile(index).root?.querySelector('.tile-sub');
-    check(`the ${name} sub-line is not emphasised`,
-      sub !== null && sub !== undefined && sub.querySelector('b') === null && !sub.classList.contains('has-parts'));
-  }
+  check('a session average alone is one row reading "avg 210"',
+    sessionOnly.length === 1 && sessionOnly[0].map((p) => p.text).join('') === 'avg 210',
+    JSON.stringify(sessionOnly));
+  check('a session average alone has one strong part', sessionOnly[0].filter((p) => p.strong).length === 1);
+  const cadenceBold = Array.from(tile(3).root?.querySelectorAll('.tile-sub b') ?? []).map((b) => b.textContent ?? '');
+  check('speed and distance are emphasised numbers',
+    cadenceBold.length === 2 && cadenceBold.every((t) => /^\d+\.\d+$/.test(t)), cadenceBold.join(','));
 });
 
 suite('bias, modes and seeking', () => {
@@ -300,9 +306,8 @@ suite('a loaded route drives the ride', () => {
   check('the route stats list filled in', (doc.querySelectorAll('#route-stats .row').length ?? 0) >= 5,
     String(doc.querySelectorAll('#route-stats .row').length));
   const labels = Array.from(doc.querySelectorAll('#metrics .tile-label')).map((l) => l.textContent);
-  check('still six tiles and no Climbed tile with a route', labels.length === 6 && !labels.includes('Climbed'),
+  check('still five tiles and no Climbed tile with a route', labels.length === 5 && !labels.includes('Climbed'),
     labels.join(', '));
-  check('the Speed tile carries the distance', /^\d+\.\d{2} km$/.test(tile(4).sub), tile(4).sub);
 
   check('the session reports a position on the course', courseSnap.coursePosition !== undefined);
   check('following the route overrides the manual grade',
@@ -312,9 +317,9 @@ suite('a loaded route drives the ride', () => {
   check('ascent is being tracked in real time', (courseSnap.coursePosition!.totalAscent ?? -1) >= 0,
     String(courseSnap.coursePosition!.totalAscent));
   // On a route the tile shows the virtual speed, which the session owns.
-  check('the speed tile shows the session speed, not the raw sensor speed',
-    Math.abs(Number(tile(4).value) - (session.snapshot.speed ?? NaN)) < 0.6,
-    `${tile(4).value} vs ${session.snapshot.speed} (sensor ${session.snapshot.live.speed})`);
+  check('the cadence tile shows the session speed, not the raw sensor speed',
+    Math.abs(parseFloat(tile(3).rows[0]) - (session.snapshot.speed ?? NaN)) < 0.6,
+    `${tile(3).rows[0]} vs ${session.snapshot.speed} (sensor ${session.snapshot.live.speed})`);
 });
 
 const workoutDuration = session.snapshot.workout!.duration;
@@ -343,7 +348,8 @@ suite('the workout hands over to free riding instead of ending the ride', () => 
   check('the interval bar says the workout is complete',
     doc.querySelector('#interval-bar .now')?.textContent?.includes('complete') ?? false,
     doc.querySelector('#interval-bar .now')?.textContent ?? 'none');
-  check('the time tile says so too', tile(5).sub === 'workout done · free riding', tile(5).sub);
+  check('the time tile still shows only the timer', /^\d+:\d{2}(:\d{2})?$/.test(tile(4).value)
+    && tile(4).root?.querySelector('.tile-sub') === null, tile(4).value);
   check('every block is marked done',
     doc.querySelectorAll('#segment-list li.done').length === overrun.workout!.segments.length,
     String(doc.querySelectorAll('#segment-list li.done').length));
@@ -521,8 +527,11 @@ suite('tabs and the devices panel', () => {
     doc.querySelectorAll('#settings-form input[type="number"]').length === 6,
     `got ${doc.querySelectorAll('#settings-form input[type="number"]').length}`);
   check('the settings form rendered its toggles',
-    doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 5,
+    doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 3,
     `got ${doc.querySelectorAll('#settings-form input[type="checkbox"]').length}`);
+  const settingsText = doc.querySelector('#settings-form')?.textContent ?? '';
+  check('the map is not configured from Settings',
+    !settingsText.includes('Show the route map') && !settingsText.includes('Keep the map centred on you'));
   check('the devices panel is not on the settings page',
     !doc.querySelector('#view-settings')?.contains(doc.querySelector('#devices-panel')));
 

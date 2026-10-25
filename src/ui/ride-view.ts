@@ -18,31 +18,38 @@ import { ElevationGraph } from './elevation-graph';
 import { MiniMap } from './mini-map';
 import { ProfileGraph } from './profile-graph';
 
+/** One row of a tile's right-hand column: plain text, or parts with the
+ *  numbers emphasised. */
+type SideRow = string | SubPart[];
+
 interface TileSpec {
   key: string;
   label: (s: SessionSnapshot) => string;
   unit?: string;
   value: (s: SessionSnapshot) => string;
-  sub?: (s: SessionSnapshot) => string | SubPart[];
+  /** up to two rows beside the value, right-aligned; empty rows are hidden */
+  side?: (s: SessionSnapshot) => SideRow[];
   stripe?: (s: SessionSnapshot) => string | undefined;
-  visible?: (s: SessionSnapshot) => boolean;
-  /** tiles sharing a key are stacked, half height, in one grid cell */
-  stack?: string;
+  /** the value alone, sized to fill the tile */
+  hero?: boolean;
 }
 
-/** "avg 210 · lap 215" — the session and current-lap averages for a metric,
- *  with the numbers as strong parts so they read at a glance from the saddle. */
-export function averages(avg: number | undefined, lap: number | undefined): SubPart[] {
-  const parts: SubPart[] = [];
+/** A number in bold beside its quieter unit or name, e.g. "32.4 km/h". */
+const figure = (value: string, unit: string): SubPart[] => [{ text: value, strong: true }, { text: ` ${unit}` }];
+
+/** "avg 210" over "lap 215" — the session and current-lap averages for a
+ *  metric, with the numbers as strong parts so they read at a glance. */
+export function averages(avg: number | undefined, lap: number | undefined): SubPart[][] {
+  const rows: SubPart[][] = [];
   for (const [name, value] of [['avg', avg], ['lap', lap]] as const) {
     if (value === undefined) continue;
-    parts.push({ text: `${parts.length ? ' · ' : ''}${name} ` }, { text: String(Math.round(value)), strong: true });
+    rows.push([{ text: `${name} ` }, { text: String(Math.round(value)), strong: true }]);
   }
-  return parts;
+  return rows;
 }
 
-/** The parts, or the fallback text when there are none. */
-const orElse = (parts: SubPart[], fallback: string): SubPart[] | string => (parts.length ? parts : fallback);
+/** The rows, or the fallback text when there are none. */
+const orElse = (rows: SubPart[][], fallback: string): SideRow[] => (rows.length ? rows : [fallback]);
 
 /** The FTP a workout's percentages are taken against: its own, if the file set
  *  one, otherwise the rider's. */
@@ -54,7 +61,7 @@ const TILES: TileSpec[] = [
     label: () => `Power ${settings.current.smoothPowerSeconds}s`,
     unit: 'W',
     value: (s) => int(s.smoothedPower),
-    sub: (s) => orElse(averages(s.avgPower, s.lapAvgPower), `${settings.current.smoothPowerSeconds}s average`),
+    side: (s) => orElse(averages(s.avgPower, s.lapAvgPower), `${settings.current.smoothPowerSeconds}s average`),
     stripe: (s) => (s.smoothedPower === undefined ? undefined : zoneForPower(s.smoothedPower, settings.current.ftp).color),
   },
   {
@@ -62,19 +69,15 @@ const TILES: TileSpec[] = [
     label: () => 'Target',
     unit: 'W',
     value: (s) => (s.controlMode === 'grade' ? '—' : int(s.targetPower)),
-    sub: (s) => {
+    side: (s) => {
       // Without a controllable trainer the target is only advice, and saying so
       // is better than letting the rider wonder why the brake is not moving.
-      if (!s.canControlTrainer) return 'no trainer control';
-      if (s.controlMode === 'grade') {
-        return s.followCourse ? `route ${dec(s.effectiveGrade, 1)}%` : `grade ${dec(s.effectiveGrade, 1)}%`;
-      }
-      // Typed watts are exact: bias does not apply to them, so it is not shown.
-      const source = s.effectiveMode === 'free'
-        ? 'free'
-        : s.blockOverride !== undefined ? 'override' : `bias ${Math.round(s.ergBias * 100)}%`;
-      const delta = s.smoothedPower !== undefined && s.targetPower > 0 ? s.smoothedPower - s.targetPower : undefined;
-      return delta === undefined ? source : `${delta >= 0 ? '+' : ''}${delta} W · ${source}`;
+      if (!s.canControlTrainer) return ['no trainer control'];
+      // The figures speak for themselves: a gradient held, then the block's cadence.
+      const rows: SideRow[] = [];
+      if (s.controlMode === 'grade') rows.push([{ text: `${dec(s.effectiveGrade, 1)}%`, strong: true }]);
+      if (s.targetCadence) rows.push(figure(String(s.targetCadence), 'rpm'));
+      return rows;
     },
     stripe: (s) => (s.targetPower > 0 ? zoneForPower(s.targetPower, settings.current.ftp).color : undefined),
   },
@@ -83,7 +86,7 @@ const TILES: TileSpec[] = [
     label: () => `Heart rate ${settings.current.smoothPowerSeconds}s`,
     unit: 'bpm',
     value: (s) => int(s.smoothedHeartRate),
-    sub: (s) => orElse(averages(s.avgHeartRate, s.lapAvgHeartRate), 'no strap'),
+    side: (s) => orElse(averages(s.avgHeartRate, s.lapAvgHeartRate), 'no strap'),
     stripe: (s) => (s.smoothedHeartRate ? hrZoneColor(s.smoothedHeartRate, settings.current.hrMax) : undefined),
   },
   {
@@ -91,25 +94,13 @@ const TILES: TileSpec[] = [
     label: () => 'Cadence',
     unit: 'rpm',
     value: (s) => int(s.live.cadence),
-    sub: (s) => (s.targetCadence ? `target ${s.targetCadence}` : ''),
-    stack: 'motion',
-  },
-  {
-    key: 'speed',
-    label: () => 'Speed',
-    unit: 'km/h',
-    value: (s) => dec(s.speed, 1),
-    sub: (s) => `${(s.distance / 1000).toFixed(2)} km`,
-    stack: 'motion',
+    side: (s) => [figure(dec(s.speed, 1), 'km/h'), figure((s.distance / 1000).toFixed(2), 'km')],
   },
   {
     key: 'time',
     label: () => 'Elapsed',
     value: (s) => hhmmss(s.elapsed),
-    sub: (s) => {
-      if (s.workoutComplete) return 'workout done · free riding';
-      return s.remaining === undefined ? 'open ride' : `${hhmmss(s.remaining)} left`;
-    },
+    hero: true,
   },
 ];
 
@@ -152,7 +143,7 @@ export class RideView {
   private graph: ProfileGraph;
   private elevation: ElevationGraph;
   private miniMap: MiniMap;
-  private tiles = new Map<string, { value: HTMLElement; sub: HTMLElement; stripe: HTMLElement; label: HTMLElement; root: HTMLElement }>();
+  private tiles = new Map<string, { value: HTMLElement; rows: HTMLElement[]; stripe: HTMLElement; label: HTMLElement; root: HTMLElement }>();
   private segmentNodes: HTMLLIElement[] = [];
   private renderedSegmentIndex = -1;
   private workout: Workout | undefined;
@@ -225,30 +216,18 @@ export class RideView {
   private buildTiles(): void {
     const host = qs('#metrics');
     clear(host);
-    const stacks = new Map<string, HTMLElement>();
     for (const spec of TILES) {
       const stripe = el('div', { class: 'tile-stripe' });
       const value = el('span', { text: '--' });
-      const sub = el('div', { class: 'tile-sub', text: '' });
       const label = el('div', { class: 'tile-label', text: spec.label(session.snapshot) });
       const valueRow = el('div', { class: 'tile-value' }, [value, spec.unit ? el('span', { class: 'tile-unit', text: spec.unit }) : null]);
-      // A stacked tile is half height: its label and sub-line share a column
-      // beside the value instead of each taking a row.
-      const root = spec.stack
-        ? el('div', { class: 'tile tile-compact' }, [stripe, el('div', { class: 'tile-head' }, [label, sub]), valueRow])
-        : el('div', { class: 'tile' }, [stripe, label, valueRow, sub]);
-      if (spec.stack) {
-        let cell = stacks.get(spec.stack);
-        if (!cell) {
-          cell = el('div', { class: 'tile-stack' });
-          stacks.set(spec.stack, cell);
-          host.append(cell);
-        }
-        cell.append(root);
-      } else {
-        host.append(root);
-      }
-      this.tiles.set(spec.key, { value, sub, stripe, label, root });
+      // The value on the left, the secondary figures in up to two rows on the
+      // right, so neither needs a line of its own under the other.
+      const rows = spec.side ? [el('div', { class: 'tile-sub' }), el('div', { class: 'tile-sub' })] : [];
+      const body = el('div', { class: 'tile-body' }, [valueRow, rows.length ? el('div', { class: 'tile-side' }, rows) : null]);
+      const root = el('div', { class: spec.hero ? 'tile tile-hero' : 'tile' }, [stripe, label, body]);
+      host.append(root);
+      this.tiles.set(spec.key, { value, rows, stripe, label, root });
     }
   }
 
@@ -590,15 +569,16 @@ export class RideView {
     for (const spec of TILES) {
       const tile = this.tiles.get(spec.key);
       if (!tile) continue;
-      const visible = spec.visible?.(s) ?? true;
-      tile.root.style.display = visible ? '' : 'none';
-      if (!visible) continue;
       setText(tile.label, spec.label(s));
       setText(tile.value, spec.value(s));
-      const sub = spec.sub?.(s) ?? '';
-      if (typeof sub === 'string') setText(tile.sub, sub);
-      else setParts(tile.sub, sub);
-      setClass(tile.sub, 'has-parts', typeof sub !== 'string');
+      const side = spec.side?.(s) ?? [];
+      tile.rows.forEach((node, i) => {
+        const row = side[i] ?? '';
+        if (typeof row === 'string') setText(node, row);
+        else setParts(node, row);
+        setClass(node, 'has-parts', typeof row !== 'string');
+        node.style.display = row.length ? '' : 'none';
+      });
       const stripe = spec.stripe?.(s);
       tile.stripe.style.background = stripe ?? 'transparent';
       setClass(tile.root, 'accent', Boolean(stripe));

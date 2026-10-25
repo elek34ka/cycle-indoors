@@ -18,34 +18,43 @@ function rule(selector: string): Record<string, string> {
 }
 const px = (value: string | undefined) => Number(/^(\d+(?:\.\d+)?)px$/.exec(value ?? '')?.[1] ?? NaN);
 
-suite('tile averages are large', () => {
+suite('secondary numbers are large', () => {
   const numbers = rule('.tile .tile-sub b');
   check('the numbers are at least 20 px', px(numbers['font-size']) >= 20, numbers['font-size']);
   check('and bold', Number(numbers['font-weight']) >= 700, numbers['font-weight']);
-  const labels = rule('.tile .tile-sub');
-  check('the labels stay at least 13 px', px(labels['font-size']) >= 13, labels['font-size']);
-  check('the averages line does not wrap', rule('.tile .tile-sub.has-parts')['white-space'] === 'nowrap');
+  const words = rule('.tile .tile-sub');
+  check('the words stay at least 13 px', px(words['font-size']) >= 13, words['font-size']);
+  check('a row never wraps', words['white-space'] === 'nowrap');
+});
+
+suite('value left, two rows right', () => {
+  const body = rule('.tile .tile-body');
+  check('the body is a row', body.display === 'flex' && body['justify-content'] === 'space-between',
+    JSON.stringify(body));
+  check('the value is centred in the height under the label', body['align-items'] === 'center' && body.flex === '1');
+  const side = rule('.tile .tile-side');
+  check('the right column stacks its rows, right-aligned', side['flex-direction'] === 'column' && side['align-items'] === 'flex-end');
+  check('and is cut off rather than pushing the value', side.overflow === 'hidden' && side['min-width'] === '0');
+  check('the value never shrinks or wraps', rule('.tile .tile-value').flex === 'none'
+    && rule('.tile .tile-value')['white-space'] === 'nowrap');
+  check('tiles are size containers', rule('.tile')['container-type'] === 'inline-size');
+  check('main values are up to 44 px, shrinking with the tile',
+    rule('.tile .tile-value')['font-size'] === 'clamp(34px, 20cqi, 44px)', rule('.tile .tile-value')['font-size']);
+});
+
+suite('the Elapsed timer matches the other main values', () => {
+  check('it has no size of its own', rule('.tile.tile-hero .tile-value')['font-size'] === undefined);
+  // "3:59:59": 7 characters at ~0.6 em less 1 px letter-spacing each, at the
+  // 44 px cap, in the content box of the narrowest tile (212 px less 26 px).
+  const content = 212 - 26;
+  check('the timer fits the narrowest tile', 7 * 0.6 * 44 - 7 <= content, `${(7 * 0.6 * 44 - 7).toFixed(0)} px of ${content}`);
+  check('and is centred', rule('.tile.tile-hero .tile-body')['justify-content'] === 'center');
 });
 
 suite('the tile grid', () => {
   const grid = rule('.metrics')['grid-template-columns'] ?? '';
   const min = px(/minmax\((\d+px)/.exec(grid)?.[1]);
-  check('columns are at least 196 px', min >= 196, grid);
-});
-
-suite('the Cadence/Speed cell fits the row', () => {
-  const stack = rule('.tile-stack');
-  check('two equal rows', stack['grid-template-rows'] === '1fr 1fr', stack['grid-template-rows']);
-  const value = rule('.tile.tile-compact .tile-value');
-  const compact = rule('.tile.tile-compact');
-  const pad = (compact.padding ?? '').split(/\s+/).map(px);
-  // One full tile: 9 + 10 px padding, 2 px border, a 12 px label (~15 px line),
-  // the 40 px value at 1.12 and the 20 px averages at 1.2.
-  const fullTile = 9 + 10 + 2 + 15 + 40 * 1.12 + 20 * 1.2;
-  const half = 2 * pad[0] + 2 + px(value['font-size']) * Number(value['line-height']);
-  const stacked = 2 * half + px(stack.gap);
-  check('two compact tiles and the gap are no taller than a full tile', stacked <= fullTile,
-    `${stacked.toFixed(1)} px vs ${fullTile.toFixed(1)} px`);
+  check('columns are at least 212 px', min >= 212, grid);
 });
 
 report();

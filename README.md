@@ -45,13 +45,15 @@ tablet on the same network you would need to serve the app over https.
   free-ride block
   overrides ERG mode, so the trainer follows the gradient — or the loaded
   route's gradient — instead of a target.
-- **Live ride view** — tiles for power, target, heart rate, cadence and speed
-  (stacked as two half-height tiles in one cell) and time, their values in
-  large figures that read from the saddle. Metres climbed and the gradient are
-  on the elevation strip, not a tile. Power and heart rate show a 3-second
-  average (the window is configurable) with the session and current-lap
-  averages underneath, their numbers large and bold so they can be read at a
-  glance.
+- **Live ride view** — five tiles: power, target, heart rate, cadence and
+  elapsed time. Each shows its main value large on the left and up to two rows
+  of secondary figures on the right, with the numbers large and bold so they
+  read from the saddle. Power and heart rate show a 3-second average (the
+  window is configurable), with the session average over the current-lap
+  average beside it. Cadence carries the speed over the distance. Target
+  carries the gradient being held, if any, and the block's cadence target.
+  Elapsed is the timer alone, growing with its tile. Metres climbed and the
+  gradient are on the elevation strip, not a tile.
   A canvas workout profile coloured by power zone carries your actual power and
   heart rate over it, averaged over the same window as the tiles so the lines do
   not jitter (the exported file keeps every raw second); the current block is highlighted, with the next block and

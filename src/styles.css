@@ -246,12 +246,13 @@ main { min-height: 0; position: relative; }
 }
 .graph-stack.no-route { grid-template-rows: minmax(120px, 1fr) 34px; }
 
-/* 196 px: "3:59:59" at the 40 px tile value is ~161 px in a monospace face
-   (7 × ~24 px, less 1 px letter-spacing each), plus 26 px of padding and border;
-   "avg 999 · lap 999" with 20 px numbers is ~158 px, so a little more room. */
+/* 212 px: Cadence is the widest tile, a 2-3 digit cadence with " rpm" (~90 px
+   at 44 px) beside "32.4 km/h" over "12.34 km" (~87 px at 20 px numbers).
+   The main values also shrink with the tile (cqi below) before the right-hand
+   column is cut off. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
   gap: 8px;
 }
 
@@ -262,6 +263,9 @@ main { min-height: 0; position: relative; }
   padding: 9px 12px 10px;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
 }
 .tile .tile-label {
   font-size: 12px;
@@ -270,45 +274,46 @@ main { min-height: 0; position: relative; }
   color: var(--text-faint);
   font-weight: 600;
 }
+/* The value on the left, centred in the height under the label; up to two
+   rows of secondary figures on the right. */
+.tile .tile-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
 .tile .tile-value {
   font-family: var(--mono);
-  font-size: 40px;
+  font-size: clamp(34px, 20cqi, 44px);
   line-height: 1.12;
   font-variant-numeric: tabular-nums;
   letter-spacing: -1px;
   white-space: nowrap;
+  flex: none;
 }
-.tile .tile-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; }
-.tile .tile-sub { font-size: 13px; color: var(--text-faint); font-family: var(--mono); }
-/* Session and lap averages: on --bg-raised the labels are 6.8:1 and the bold
-   numbers 15:1, and the numbers are drawn larger than their labels, so they
-   read from the saddle. One line, never wrapped. */
-.tile .tile-sub.has-parts { color: var(--text-dim); white-space: nowrap; overflow: hidden; }
+.tile .tile-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; letter-spacing: 0; }
+.tile .tile-side {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.tile .tile-sub { font-size: 13px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
+/* Averages, speed, distance, cadence target: on --bg-raised the words are
+   6.8:1 and the bold numbers 15:1, and the numbers are drawn larger than their
+   words, so they read from the saddle. */
+.tile .tile-sub.has-parts { color: var(--text-dim); }
 .tile .tile-sub b { color: var(--text); font-weight: 700; font-size: 20px; line-height: 1.2; }
+/* Elapsed: the timer alone, centred, at the same size as the other main
+   values. "3:59:59" at 44 px is ~178 px, inside the 186 px content box of the
+   narrowest tile. */
+.tile.tile-hero .tile-body { justify-content: center; }
 .tile.accent { border-color: #2c4f74; }
 .tile .tile-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
-
-/* Cadence over Speed in one cell. The row's height comes from the full tiles
-   (~105 px with the 20 px averages); each half is 10 px of padding and border
-   around a 28 px value, ~41 px, so two and the gap stay inside it. */
-.tile-stack {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 8px;
-  min-width: 0;
-  min-height: 0;
-}
-.tile.tile-compact {
-  padding: 4px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  min-height: 0;
-}
-.tile-compact .tile-head { min-width: 0; }
-.tile-compact .tile-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile.tile-compact .tile-value { font-size: 28px; line-height: 1.1; }
 
 .interval-bar {
   display: flex;

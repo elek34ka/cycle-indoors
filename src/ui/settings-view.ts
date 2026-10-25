@@ -15,16 +15,6 @@ const TOGGLES: ToggleSpec[] = [
     hint: 'Reconnects sensors you have already paired, without opening the chooser again.',
   },
   {
-    key: 'showMiniMap',
-    label: 'Show the route map',
-    hint: 'The small map in the corner of the ride screen — shown only when a route is loaded. Press M to toggle it while riding.',
-  },
-  {
-    key: 'miniMapFollow',
-    label: 'Keep the map centred on you',
-    hint: 'Follows your position at close zoom. There is a Follow switch inside the map too.',
-  },
-  {
     key: 'debugMode',
     label: 'Debug tools',
     hint: 'Records Bluetooth traffic and offers it as a download on the Devices tab, for diagnosing a misbehaving trainer. Off, nothing is recorded.',
