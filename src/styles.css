@@ -618,6 +618,9 @@ input[type="number"], input[type="text"] {
 .zone-bars .time { font-family: var(--mono); font-size: 13px; color: var(--text-dim); text-align: right; }
 
 .summary-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+/* The Strava slot swaps a button for a link; neither may shift the row. */
+.strava-slot { display: flex; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 
 .confirm-overlay { z-index: 50; }
 .confirm-card { width: min(440px, 100%); gap: 14px; }

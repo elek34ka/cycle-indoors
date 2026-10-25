@@ -25,9 +25,10 @@ The dev server is sometimes left running detached from a previous session.
 3. FTMS trainer control (ERG + simulation) — **done**
 4. Polish, then a backend — **current**
 
-Likely next: ride persistence in IndexedDB (a reload currently destroys an
-in-progress ride, and it is the prerequisite for reliable Strava upload), then
-ride history and a workout library.
+Strava upload is built (Settings panel, summary button, opt-in auto-upload) —
+deliberately without persistence, at the owner's choice. Likely next: ride
+persistence in IndexedDB (a reload still destroys an in-progress or
+not-yet-uploaded ride), then ride history and a workout library.
 
 Work on this project is delivered in numbered phases. Finish one completely —
 code, tests and docs — before starting the next, rather than leaving several
@@ -45,8 +46,12 @@ verify:
   and gives every element a 320x200 box so Leaflet's zoom maths works.
 - BLE is tested against `tests/fake-gatt.ts`, a stand-in GATT stack. Real
   trainers have never been connected to this code.
-- The Strava relay (`relay/src/index.ts`) is tested against a stand-in
-  `fetch` in `tests/strava-relay.test.ts`; Strava itself is never called.
+- The Strava relay (`relay/src/index.ts`) and client (`src/activity/strava.ts`)
+  are tested against stand-in `fetch`es; Strava itself is never called. The
+  real flow has been checked by hand only up to the relay's code exchange.
+- Every test file runs in one Node process, so globals leak between them:
+  `dom-setup.ts` installs jsdom's `Blob`, which Node's `FormData` rejects. The
+  Strava tests put Node's `Blob` back.
 - FIT encoding and decoding are validated against Garmin's own `@garmin/fitsdk`,
   which independently confirms field numbers, scaling and CRC. Keep doing that
   for any new FIT field — it is the only thing standing between a plausible
@@ -80,6 +85,14 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   8 m/s are discarded when totalling ascent, in both `computeMetrics` and the
   FIT exporter.
 
+- **Strava's consent page lets the rider untick "upload activities"** and
+  still sends a code. Check the granted scope before exchanging it; Strava
+  reports scopes comma-separated in the redirect and space-separated in the
+  token reply.
+- **Strava refresh tokens rotate**, and the old one dies at once. Every
+  refresh goes through `exclusive` (a Web Lock) and re-reads storage first,
+  or two tabs refreshing together log the rider out.
+
 ## Decisions worth not re-litigating
 
 - `setResistance` is **deliberately unimplemented**: FTMS defines the target as
@@ -98,6 +111,12 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   computed; raw GPS altitude is unusable for gradient.
 - A workout running out **does not end the ride** — it hands over to free
   riding until the rider presses Finish.
+- Strava approval opens in a **pop-up, not a redirect**, so the in-memory ride
+  is never navigated away from, and the callback reports over a
+  `BroadcastChannel`, not `window.opener`, which a COOP header would sever.
+  Auto-upload never opens the pop-up itself.
+- Strava tokens are in their own `localStorage` key, **not in settings**, so
+  "Reset to defaults" does not disconnect.
 - `base` in `vite.config.ts` comes from `BASE_PATH` so GitHub Pages can serve
   from a subpath; it stays `/` locally.
 
@@ -111,7 +130,8 @@ pair precisely so the drawing code and the hit test cannot drift apart.
 - `src/activity/fit-export.ts` — already produces an upload-ready activity, so
   the Strava integration needs no new encoding.
 - `relay/` — the Strava token relay (Cloudflare Worker), already deployed and
-  verified with a real authorization code. Strava requires `client_secret` for
+  verified with a real authorization code; `src/activity/strava.ts` is its
+  only caller. Strava requires `client_secret` for
   the code exchange *and* every refresh (access tokens last 6 h, refresh tokens
   rotate) and has no PKCE, so this is not optional. It only ever handles
   tokens; the browser uploads to Strava directly. Never put the secret

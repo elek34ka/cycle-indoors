@@ -8,6 +8,7 @@ import { DevicesView } from './devices-view';
 import { RideView } from './ride-view';
 import { RouteSmootherView } from './route-smoother-view';
 import { buildSettingsView } from './settings-view';
+import { buildStravaPanel } from './strava-panel';
 import { showSummary } from './summary';
 import { qs, toast } from './dom';
 
@@ -16,6 +17,7 @@ type TabName = 'ride' | 'devices' | 'settings';
 export function bootApp(): void {
   new RideView((snapshot) => showSummary(snapshot));
   buildSettingsView();
+  buildStravaPanel();
   new RouteSmootherView();
   new DevicesView();
   keepScreenAwake(navigator, document);

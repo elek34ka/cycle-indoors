@@ -3,8 +3,17 @@ import { settings } from '../core/settings';
 import { buildActivityFit, downloadBytes } from '../activity/fit-export';
 import { computeMetrics } from '../session/metrics';
 import { session, type SessionSnapshot } from '../session/session';
+import { strava, StravaNotConnected, type UploadResult } from '../activity/strava';
 import { clear, el, qs, toast } from './dom';
 import { confirmDialog } from './confirm';
+import { connectStrava } from './strava-panel';
+
+/** Strava uploads by ride start time, so reopening a summary neither repeats
+ *  an upload nor loses track of one still in flight. */
+interface UploadState { result?: UploadResult; busy?: string }
+const uploads = new Map<number, UploadState>();
+/** every rendered button for a ride, so whichever summary is open shows progress */
+const uploadViews = new Map<number, Set<() => void>>();
 
 function cell(label: string, value: string, note?: string): HTMLElement {
   return el('div', { class: 'cell' }, [
@@ -71,6 +80,9 @@ export function showSummary(snapshot: SessionSnapshot): void {
     ]))));
   }
 
+  const fileName = `cycle-indoors-${fileStamp(startedAt)}.fit`;
+  const buildFit = () => buildActivityFit({ startedAt, samples, laps: snapshot.laps, metrics, name: title });
+
   const download = el('button', {
     class: 'btn btn-primary',
     text: 'Download .fit',
@@ -78,8 +90,8 @@ export function showSummary(snapshot: SessionSnapshot): void {
     on: {
       click: () => {
         try {
-          const bytes = buildActivityFit({ startedAt, samples, laps: snapshot.laps, metrics, name: title });
-          downloadBytes(bytes, `cycle-indoors-${fileStamp(startedAt)}.fit`);
+          const bytes = buildFit();
+          downloadBytes(bytes, fileName);
           // The ride can now be discarded without losing it.
           session.markExported();
           toast('FIT file downloaded — upload it to Strava or intervals.icu.');
@@ -101,7 +113,7 @@ export function showSummary(snapshot: SessionSnapshot): void {
           if (samples.length > 0 && !session.exported) {
             const confirmed = await confirmDialog({
               title: 'Discard this ride?',
-              message: `${hhmmss(metrics.duration)} of riding has not been downloaded. `
+              message: `${hhmmss(metrics.duration)} of riding has not been downloaded or uploaded. `
                 + 'Starting a new ride will throw it away.',
               confirmText: 'Discard and start new',
               cancelText: 'Keep this ride',
@@ -114,9 +126,89 @@ export function showSummary(snapshot: SessionSnapshot): void {
         },
       },
     }),
+    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName })) : null,
     download,
   ]));
 
   overlay.append(card);
   overlay.classList.remove('hidden');
+}
+
+/**
+ * Upload to Strava, or a link to the activity once it is there. With
+ * auto-upload on and a connection already in place, the upload starts as soon
+ * as the summary opens; it never opens Strava's pop-up by itself.
+ */
+function stravaButton(
+  startedAt: Date,
+  ride: () => { bytes: Uint8Array; name: string; fileName: string },
+): HTMLElement {
+  const key = startedAt.getTime();
+  const slot = el('span', { class: 'strava-slot' });
+
+  const render = () => {
+    clear(slot);
+    const state = uploads.get(key);
+    const result = state?.result;
+    if (result && result.kind !== 'processing' && result.url) {
+      slot.append(el('a', {
+        class: 'btn',
+        text: result.kind === 'duplicate' ? 'Already on Strava' : 'View on Strava',
+        attrs: { href: result.url, target: '_blank', rel: 'noopener' },
+      }));
+    } else if (result) {
+      slot.append(el('button', { class: 'btn', text: 'Sent to Strava', disabled: true }));
+    } else {
+      slot.append(el('button', {
+        class: 'btn',
+        text: state?.busy ?? 'Upload to Strava',
+        disabled: Boolean(state?.busy),
+        on: { click: () => void uploadRide(key, ride, true) },
+      }));
+    }
+  };
+
+  let views = uploadViews.get(key);
+  if (!views) uploadViews.set(key, views = new Set());
+  // Only the open summary needs telling; one replaced by a newer summary is dropped.
+  for (const view of [...views]) views.delete(view);
+  views.add(render);
+  render();
+
+  if (settings.current.stravaAutoUpload && strava.status === 'connected' && !uploads.has(key)) {
+    void uploadRide(key, ride, false);
+  }
+  return slot;
+}
+
+async function uploadRide(
+  key: number,
+  ride: () => { bytes: Uint8Array; name: string; fileName: string },
+  fromClick: boolean,
+): Promise<void> {
+  if (uploads.has(key)) return;
+  const set = (state: UploadState | undefined) => {
+    if (state) uploads.set(key, state); else uploads.delete(key);
+    uploadViews.get(key)?.forEach((render) => render());
+  };
+  // Connecting opens a pop-up, which browsers only allow from a click.
+  if (strava.status !== 'connected' && !(fromClick && (await connectStrava()))) return;
+  if (uploads.has(key)) return;
+
+  set({ busy: 'Uploading…' });
+  try {
+    const { bytes, name, fileName } = ride();
+    const result = await strava.upload(bytes, { name, externalId: fileName }, (busy) => set({ busy }));
+    set({ result });
+    // Safe on Strava, so discarding the ride no longer loses it.
+    if (session.startedAt?.getTime() === key) session.markExported();
+    toast(result.kind === 'created' ? 'Uploaded to Strava.'
+      : result.kind === 'duplicate' ? 'This ride is already on Strava.'
+      : 'Sent to Strava. It is still processing and will appear in your feed shortly.');
+  } catch (err) {
+    set(undefined);
+    toast(err instanceof StravaNotConnected
+      ? `${err.message} Then press Upload to Strava.`
+      : `Upload to Strava failed: ${(err as Error).message}`, 'error');
+  }
 }

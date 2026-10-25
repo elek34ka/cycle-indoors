@@ -9,11 +9,11 @@ export as a `.fit` activity.
 
 Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/Auuki)).
 
-Frontend only — no accounts, nothing leaves the browser. Settings live in
-`localStorage`; rides are kept in memory until you download them. The one
-server-side piece is `relay/`, a stateless Cloudflare Worker that holds the
-Strava client secret for the upload integration being built (see
-[Strava token relay](#strava-token-relay)); the app does not call it yet.
+Frontend only — no accounts, and nothing leaves the browser unless you send a
+ride to Strava. Settings live in `localStorage`; rides are kept in memory until
+you download or upload them. The one server-side piece is `relay/`, a stateless
+Cloudflare Worker that holds the Strava client secret (see
+[Strava token relay](#strava-token-relay)).
 
 ## Running it
 
@@ -308,12 +308,48 @@ smoothed height, and no times or sensor data, because it is a course and not a
 ride. **Ride this route** makes it the ride's course straight away. It is
 unavailable while a ride is running or paused.
 
+**Strava upload.** A **Strava** panel on the Settings tab connects the
+browser to a Strava account, shows who is connected, holds an **Upload
+automatically when I finish** toggle (off by default) and a **Disconnect**
+that revokes the app on Strava as well as forgetting it here. The summary
+gains **Upload to Strava** beside **Download .fit**.
+
+- **Connecting** opens Strava's approval page in a pop-up, so the ride on
+  screen is never navigated away from. Strava sends the pop-up to
+  `strava-callback.html`, which hands the result back over a
+  `BroadcastChannel` — still delivered if Strava's pages ever cut the pop-up
+  off from its opener. The app checks the `state`, refuses an approval with
+  the upload permission unticked, and swaps the code for tokens through the
+  relay.
+- **How often a rider connects:** once per browser. The access token lasts
+  6 hours and is refreshed through the relay when it is within 2 minutes of
+  expiry, with no prompt; Strava rotates the refresh token on each refresh and
+  the new one replaces the old. Refreshing runs under a Web Lock, so two tabs
+  never spend the same refresh token. The rider is asked again only after
+  revoking the app on Strava, clearing site data, or in another browser or a
+  private window — and then the next upload says so instead of failing
+  quietly.
+- **Uploading** posts the same FIT file as **Download .fit**, flagged as a
+  trainer ride, named after the workout, with the file name as `external_id`
+  so Strava recognises the same ride sent twice. The app polls until Strava
+  has made the activity, then the button becomes **View on Strava**. A
+  duplicate becomes **Already on Strava**, linking to the existing activity.
+  After a minute of processing it stops polling and reports the ride as sent.
+- **Auto-upload** starts as soon as the summary opens, but only with a
+  connection already in place: it never opens the pop-up itself, which
+  browsers would block anyway. Reopening a summary neither repeats an upload
+  nor loses one in flight.
+- A successful upload counts as saving the ride, so **New ride** stops
+  warning. A failed one says why — no network, rate limit, Strava's own
+  processing error — and leaves the button to try again.
+- **No persistence yet**, by choice: the ride still lives only in memory, so
+  closing the tab before uploading or downloading loses it.
+
 ### What is deliberately not here yet
 
-No ride history or workout library persistence, no
-account, no upload integrations (the Strava relay is deployed; the app side is
-not built), no power meter zero-offset calibration, no
-virtual-gear or steering support.
+No ride history or workout library persistence (so no upload retry across a
+reload), no account, no upload integrations beyond Strava, no power meter
+zero-offset calibration, no virtual-gear or steering support.
 
 ## Layout
 
@@ -332,6 +368,7 @@ src/
                trackers, GATT transport with reconnect, pairing
   ui/          app shell, ride view, power graph, elevation graph, mini map,
                summary, settings + devices, route smoother
+public/       copied verbatim into the build: strava-callback.html
 relay/        Strava token relay — a Cloudflare Worker, deployed on its own
 tests/         node-run suites (FIT round-trip, parsers, full app boot in jsdom)
 samples/       a workout and a route to try the loaders on
@@ -383,6 +420,9 @@ for Strava app `290716`, whose **Authorization Callback Domain** is
 dev server needs nothing extra).
 
 ### Deploying it
+
+The app's side of it is `src/activity/strava.ts`, which holds the relay URL
+and client id; both are public.
 
 The secret never goes in the repo: in production it is a Worker secret, and
 locally it lives in the gitignored `relay/.dev.vars`.
@@ -554,6 +594,21 @@ curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.d
   right grant type; the reply keeps the tokens, expiry and scope, drops the
   athlete and never echoes the secret; Strava's errors and an unreachable
   Strava reach the app with CORS headers intact.
+- **strava** — the Strava client against a fake Strava, relay, pop-up and
+  storage: the approval URL, an answer for another attempt ignored, refusal,
+  an unticked upload permission, cancel and a blocked pop-up; tokens kept
+  across a reload; a refresh two minutes before expiry that rotates the
+  refresh token under the lock; a revoked app forgetting its tokens; the
+  upload's form fields, polling, duplicate, processing error, rate limit,
+  401, a slow Strava and no network; disconnect with and without Strava
+  reachable. It also checks `public/strava-callback.html` uses the same
+  channel.
+- **strava-ui** — the Settings panel and the summary in jsdom with the real
+  client, faking only the network and `window.open`: connect through the
+  callback channel, auto-upload on finish with no click and no pop-up, no
+  second upload on reopening, the button with auto-upload off, a duplicate, a
+  failure that can be retried, Upload while disconnected connecting first,
+  and an unticked permission.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and forward-only seeking (the Jump group holds only
