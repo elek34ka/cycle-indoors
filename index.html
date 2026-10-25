@@ -12,6 +12,7 @@
         <div class="brand">Cycle<span>Indoors</span></div>
         <nav class="tabs" id="tabs">
           <button type="button" data-tab="ride" class="active">Ride</button>
+          <button type="button" data-tab="library">Library</button>
           <button type="button" data-tab="devices">Devices</button>
           <button type="button" data-tab="settings">Settings</button>
         </nav>
@@ -30,9 +31,10 @@
             </div>
             <div class="drop-zone" id="workout-drop">
               <strong>Drop a .zwo or .fit workout</strong>
-              <span>or pick one from the library</span>
+              <span>or browse the library</span>
             </div>
-            <select id="library-select" class="select"></select>
+            <button type="button" class="btn btn-wide" id="browse-library">Browse library</button>
+            <div id="up-next" class="up-next" hidden></div>
             <div id="workout-meta" class="workout-meta"></div>
             <ol id="segment-list" class="segment-list"></ol>
 
@@ -62,6 +64,10 @@
             </div>
             <div class="controls" id="controls"></div>
           </div>
+        </section>
+
+        <section class="view view-library" id="view-library">
+          <div class="library" id="library-root"></div>
         </section>
 
         <section class="view view-page" id="view-devices">

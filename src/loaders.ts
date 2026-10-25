@@ -12,7 +12,8 @@ export interface LoadResult {
   fileName: string;
 }
 
-function baseName(name: string): string {
+/** A file name as a title: extension dropped, `_` and `-` runs turned into spaces. */
+export function baseName(name: string): string {
   return name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Untitled';
 }
 

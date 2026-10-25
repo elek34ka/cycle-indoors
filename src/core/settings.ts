@@ -1,5 +1,6 @@
 import { Emitter } from './pubsub';
 import { PRESETS, matchPreset, type SmoothingParams, type SmoothingPreset } from '../activity/smoothing';
+import { NO_FILTERS, type LibraryFilters, type LibrarySection } from '../library/filter';
 
 export interface Settings {
   ftp: number;            // W
@@ -25,6 +26,9 @@ export interface Settings {
   routeSmoothing: SmoothingParams & { preset: SmoothingPreset };
   /** upload each finished ride to Strava without pressing the button */
   stravaAutoUpload: boolean;
+  /** the Library's open section and its search and filters */
+  librarySection: LibrarySection;
+  libraryFilters: LibraryFilters;
 }
 
 const DEFAULTS: Settings = {
@@ -43,6 +47,8 @@ const DEFAULTS: Settings = {
   debugMode: false,
   routeSmoothing: { ...PRESETS.medium, preset: 'medium' },
   stravaAutoUpload: false,
+  librarySection: 'workouts',
+  libraryFilters: NO_FILTERS,
 };
 
 const KEY = 'cycle-indoors.settings.v1';
@@ -52,7 +58,12 @@ const KEY = 'cycle-indoors.settings.v1';
  *  settings were saved; the values themselves are kept as they were. */
 export function restoreSettings(saved: Partial<Settings>): Settings {
   const value = { ...DEFAULTS, ...saved };
-  return { ...value, routeSmoothing: { ...value.routeSmoothing, preset: matchPreset(value.routeSmoothing) } };
+  return {
+    ...value,
+    routeSmoothing: { ...value.routeSmoothing, preset: matchPreset(value.routeSmoothing) },
+    // filters added later still get their defaults
+    libraryFilters: { ...NO_FILTERS, ...saved.libraryFilters },
+  };
 }
 
 class SettingsStore extends Emitter<{ change: Settings }> {

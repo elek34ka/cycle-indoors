@@ -13,7 +13,13 @@ for the things the code and the README do not say.
 npm run dev      # http://127.0.0.1:5173 — run it in your own terminal, Ctrl+C stops it
 npm test         # ~1300 checks, no browser needed; must be green before any deploy
 npm run build    # tsc --noEmit + vite build into dist/
+npm run catalog:build             # content/ → .catalog/, no upload
+npm run catalog:sync -- --dry-run # what a publish to R2 would do; real sync drops the flag
 ```
+
+`content/` (the owner's raw workouts/routes/plans) and `.catalog/` are
+gitignored. Never commit either, and never sync to R2 without being asked: it
+publishes to the owner's public bucket.
 
 The dev server is sometimes left running detached from a previous session.
 `lsof -ti:5173 | xargs kill` stops it.
@@ -26,9 +32,13 @@ The dev server is sometimes left running detached from a previous session.
 4. Polish, then a backend — **current**
 
 Strava upload is built (Settings panel, summary button, opt-in auto-upload) —
-deliberately without persistence, at the owner's choice. Likely next: ride
-persistence in IndexedDB (a reload still destroys an in-progress or
-not-yet-uploaded ride), then ride history and a workout library.
+deliberately without persistence, at the owner's choice. In progress: the
+content catalog and Library (OpenSpec change `add-content-catalog`). Its
+phases are all built: the catalog, its R2 publishing, the Library tab, My
+library (IndexedDB), plans as folders, done marks and following a plan.
+Integration checks remain. After that: ride persistence (a
+reload still destroys an in-progress or not-yet-uploaded ride), then ride
+history.
 
 Work on this project is delivered in numbered phases. Finish one completely —
 code, tests and docs — before starting the next, rather than leaving several
@@ -92,6 +102,48 @@ pair precisely so the drawing code and the hit test cannot drift apart.
 - **Strava refresh tokens rotate**, and the old one dies at once. Every
   refresh goes through `exclusive` (a Web Lock) and re-reads storage first,
   or two tabs refreshing together log the rider out.
+- **The catalog is built with the app's own parsers**, through `loadFile`, in
+  Node with jsdom's `DOMParser` (`scripts/catalog/main.ts`). Do not add a
+  Node-side XML parser for speed: the index's duration/TSS/ascent would drift
+  from what the ride shows. `tests/catalog-parity.test.ts` guards this.
+- **Catalog files are keyed by content hash** (`files/<sha256>.<ext>`), and
+  sync uploads `index.json` *after* every file and deletes *after* the index.
+  Reordering either lets riders fetch an index that points at missing files.
+  Sync's diff is against the bucket's own index; files orphaned by a failed
+  run are never listed there and so are never cleaned up (harmless).
+- **A plan is a folder, ordered at build time** (`sortPlan` in
+  `src/catalog/build.ts`): by sub-folder, then by the titles' `N.M` sequence
+  when *every* title in the plan has one, else by file name, all in natural
+  order. Both cases occur in the owner's plans; check the real `content/`
+  before changing the rule. The order is fixed in the index. Never sort plan workouts again in the app, and
+  never sort ids with plain `<`: `_10_` would land before `_2_`. Many Zwift
+  plan files (rest days, swims, runs) have no blocks and are reported as
+  problems on every build; that is expected, not a regression.
+- **`import.meta.env` does not exist outside Vite**: code under `src/` that
+  the suite or the catalog script imports must read it as
+  `import.meta.env?.X` (see `src/catalog/config.ts`).
+- **One IndexedDB database, `cycle-indoors`** (`src/library/db.ts`), now at
+  version 2: `files` (My library, keyed by SHA-256), `plan` (the followed
+  plan) and `done` (done marks, keyed by Library entry key). Version 1 is in
+  the owner's browser; the upgrade handler only creates missing stores, so it
+  keeps its files. A new feature that needs storage, such as ride
+  persistence, bumps `DB_VERSION` and adds its stores in the upgrade
+  handler; it must not open a second database.
+- **Done marks are keyed by Library entry** (`catalog:workout:<path>`,
+  `builtin:<id>`, `mine:<sha256>`), not by file hash, so renaming a catalog
+  file resets its mark. The summary learns which entry was ridden from
+  `src/library/loaded.ts`, a `WeakMap` keyed by the parsed `Workout`: any
+  new load replaces the session's workout object, so never copy or rebuild
+  a `Workout` between loading and finishing, or the offer silently
+  disappears. The store never rejects on
+  open: a refused browser gets `UNAVAILABLE_STORE`, and the UI says so.
+  Tests use `fake-indexeddb`'s `IDBFactory` passed in explicitly, never its
+  `auto` import, which would leak a global into every later test file.
+- **Reading from an R2 bucket that does not exist returns `403: Forbidden`**,
+  not a 404 (confirmed 2026-10-25: the same login read fine once the bucket
+  was created). A 403 can also mean a login without R2 access. A missing *object* is "The
+  specified key does not exist." — the sync treats only that as an empty
+  bucket.
 
 ## Decisions worth not re-litigating
 
@@ -129,6 +181,11 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   (one per 500 ms, latest wins). New control paths belong here, not in the UI.
 - `src/activity/fit-export.ts` — already produces an upload-ready activity, so
   the Strava integration needs no new encoding.
+- `src/catalog/` — the content catalog. `build.ts` is pure (files in, index
+  + hashed files out) and `sync.ts` takes a `BucketRunner`, so both run in
+  the suite; only `scripts/catalog/main.ts` touches the disk and Wrangler.
+  `summary.ts` is meant for the browser too (My library), so a file reads the
+  same wherever it is listed.
 - `relay/` — the Strava token relay (Cloudflare Worker), already deployed and
   verified with a real authorization code; `src/activity/strava.ts` is its
   only caller. Strava requires `client_secret` for

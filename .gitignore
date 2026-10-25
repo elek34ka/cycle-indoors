@@ -11,3 +11,8 @@ openspec
 # Strava relay: local secret and Wrangler state
 relay/.dev.vars
 relay/.wrangler
+
+# Catalog source files, synced to R2 by script, not committed
+content/
+# Built catalog (npm run catalog:build), published to R2, not committed
+.catalog/

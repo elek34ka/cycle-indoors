@@ -10,8 +10,10 @@ export as a `.fit` activity.
 Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/Auuki)).
 
 Frontend only — no accounts, and nothing leaves the browser unless you send a
-ride to Strava. Settings live in `localStorage`; rides are kept in memory until
-you download or upload them. The one server-side piece is `relay/`, a stateless
+ride to Strava. Settings live in `localStorage`. Workouts and routes you load
+from files are kept in IndexedDB (My library). Rides are still kept only in
+memory until you download or upload them. The catalog is read from a public R2
+bucket. The one server-side piece is `relay/`, a stateless
 Cloudflare Worker that holds the Strava client secret (see
 [Strava token relay](#strava-token-relay)).
 
@@ -41,7 +43,8 @@ tablet on the same network you would need to serve the app over https.
 ### What phase 1 gives you
 
 - **Workout loading** — `.zwo` (Zwift) and `.fit` workout files, by file picker
-  or drag and drop, plus a built-in library of six workouts. Both parsers
+  or drag and drop, plus a built-in library of six workouts and the published
+  catalog, both browsed in the **Library** tab (see below). Both parsers
   flatten repeats into a single timeline, so `IntervalsT Repeat="5"` becomes ten
   blocks and a FIT `repeatUntilStepsCmplt` step is expanded the same way. The
   library includes a 1-hour pure free ride with no power targets at all. A
@@ -351,10 +354,111 @@ gains **Upload to Strava** beside **Download .fit**.
 - **No persistence yet**, by choice: the ride still lives only in memory, so
   closing the tab before uploading or downloading loses it.
 
+**Library.** A **Library** tab, between Ride and Devices, lists workouts,
+routes and plans. The Workout panel's **Browse library** button opens it on
+Workouts.
+
+- **Sources.** The six built-in workouts, the published catalog and My
+  library, each entry labelled with where it comes from.
+- **Workouts** show their duration, TSS and IF, their tags, and a small
+  profile coloured by power zone. Selecting one shows its author, its
+  description and every block in watts at the FTP in Settings.
+  Descriptions come from other people's files, so they are always shown as
+  plain text, never as HTML, with their line breaks kept.
+- **Routes** show their distance, metres climbed and an elevation
+  thumbnail.
+- **Plans** show their number of workouts, hours and TSS. Selecting one
+  lists its workouts in order under their sub-folder headings, each with a
+  Ride button. Search matches a plan's title and its workouts' titles.
+- **Search** covers title, author and tags; every word typed must match. A
+  source filter and a tag filter narrow every list. Workouts also filter by
+  minutes, and routes by distance and ascent. The filters and the open
+  section are remembered. When nothing matches, the list says so and offers
+  to clear the filters.
+- **Ride** loads an entry and switches to the Ride tab. A catalog file is
+  downloaded only then. It goes through the same loader as a dropped file,
+  so the result is identical. Its SHA-256 is checked against the index, and
+  a file that does not match is refused as "the catalog is out of date".
+  A download that fails leaves the ride's workout and route as they were.
+  While a ride is running or paused, every Ride button is disabled and the
+  Library says why.
+- **The catalog is fetched each time the tab opens, never at boot.** If it
+  cannot be reached, or its index is from a newer app, the Library says so
+  with a **Retry** button and still lists the built-in workouts. The ride
+  screen never waits for it.
+
+**My library.** Every workout or route you load from a file, by picker or
+drag and drop, is kept in the browser's IndexedDB with its original bytes.
+It is listed in the Library under **My library**, so it is still there after
+a reload.
+
+- A file that fails to parse is not kept.
+- Loading the same file again keeps it once. Files are told apart by the
+  SHA-256 of their bytes, not their name, and loading one moves it to the
+  top.
+- A `.fit` file that is both a workout and a route is kept once and listed
+  in both sections.
+- **Loading from My library parses the stored bytes again** at the FTP in
+  Settings now, exactly as the first load did.
+- **Remove** asks first. It forgets the stored copy only. The file on disk is
+  untouched, and a ride that has it loaded keeps it.
+- On the first file kept, the app asks the browser to keep its storage
+  persistent, so it is not evicted under pressure. The browser may refuse.
+- **Nothing in My library is sent anywhere.**
+- If the browser will not give the app storage (a private window, blocked
+  site data, a full disk), files still load for that session. A message says
+  the file could not be saved, and the Library says My library is
+  unavailable.
+
+**Done marks.** Any workout can be marked done: built-in, catalog, plan
+workout or My library.
+
+- **Where:**
+  - **Mark as done** in a workout's details in the Library;
+  - **Done** beside each workout in a plan;
+  - on the ride summary after **Finish**, which offers **Mark "<title>" as
+    done** for the workout that was ridden.
+- **Never automatic.** Finishing does not mark anything, whether or not the
+  workout ran to its end, because `+30s` can run one out without it having
+  been ridden.
+- **How marks show:** a done workout's row shows **Done** and the date.
+  The **Done** filter (done or not, done, not done) narrows Workouts and a
+  plan's workout list, and is remembered with the other filters.
+- **Storage:** marks live in IndexedDB, in this browser only. There are no
+  accounts, so they do not follow you to another device, and they are never
+  sent anywhere.
+- **A mark belongs to the Library entry, not the file's bytes.** An edited
+  catalog workout keeps its mark. **Renaming or moving a catalog file resets
+  it**, because the path is the id. A workout in two plans is marked
+  separately in each. Removing a My library entry removes its mark.
+- **The summary offers a mark** only for a workout the Library knows. A file
+  from disk counts once My library has kept it. Loading another workout
+  mid-ride changes which one is offered.
+- **Without storage,** the mark buttons are disabled and say why.
+
+**Following a plan.** **Follow this plan** in a plan's details makes it your
+plan. Its first workout, in plan order, that is not marked done is offered
+as **Up next**, with Ride, at the top of the Plans section and in the ride
+screen's Workout panel.
+
+- **Up next is never stored.** It is worked out from the marks, so it moves
+  on as soon as a workout is marked. Marking a later workout does not skip
+  the earlier ones.
+- **Plan entries** show *n of m done*.
+- **One plan at a time.** Following another replaces it without asking,
+  because marks are kept either way. **Stop following** clears it. The
+  followed plan is listed first in the Plans section.
+- **When there is no Up next,** the panel says so instead:
+  - the plan is complete;
+  - the plan is no longer in the catalog;
+  - the catalog cannot be reached.
+- **Boot does not wait.** The catalog is fetched in the background, and only
+  when a plan is followed.
+
 ### What is deliberately not here yet
 
-No ride history or workout library persistence (so no upload retry across a
-reload), no account, no upload integrations beyond Strava, no power meter
+No ride history or ride persistence (so no upload retry across a reload),
+no calendar scheduling of plans, no account, no upload integrations beyond Strava, no power meter
 zero-offset calibration, no virtual-gear or steering support.
 
 ## Layout
@@ -373,9 +477,14 @@ src/
   devices/ble/ Web Bluetooth: UUIDs, characteristic parsers, revolution
                trackers, GATT transport with reconnect, pairing
   ui/          app shell, ride view, power graph, elevation graph, mini map,
-               summary, settings + devices, route smoother
+               summary, settings + devices, route smoother, Library
+  catalog/     content catalog: index format, workout/route summaries, the
+               builder, sync planning, catalog URL, the client that fetches it
+  library/     Library entries from every source, search and filters, the
+               IndexedDB store and My library
 public/       copied verbatim into the build: strava-callback.html
 relay/        Strava token relay — a Cloudflare Worker, deployed on its own
+scripts/       test runner; catalog build/sync (catalog.mjs, catalog/) and R2 CORS rules
 tests/         node-run suites (FIT round-trip, parsers, full app boot in jsdom)
 samples/       a workout and a route to try the loaders on
 ```
@@ -452,6 +561,143 @@ curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.d
      -H "Origin: http://127.0.0.1:5173" -H "content-type: application/json" \
      -d '{"code":"nope"}'
 ```
+
+## Content catalog
+
+Workouts, routes and training plans are published as a static catalog: raw
+files plus one `index.json` that describes them, on a public Cloudflare R2
+bucket. There is no server. Publishing new content never needs an app deploy.
+
+The app reads it in the **Library** tab. Live at
+`https://pub-4821c98870dc4a12b6e474d06acab38a.r2.dev`.
+
+### The `content/` folder
+
+`content/` holds the source files. It is gitignored, so it lives only on the
+machine that publishes the catalog.
+
+```
+content/
+  workouts/   .zwo and .fit workouts
+  routes/     .gpx and .fit routes (a .fit needs GPS records)
+  plans/      one folder per training plan, holding .zwo and .fit workouts
+```
+
+- **Sub-folders become tags** in `workouts/` and `routes/`.
+  `workouts/vo2/short/x.zwo` is tagged `vo2` and `short`. Plans are different:
+  see below.
+- **The path is the id.** That file's id is `workout:vo2/short/x`. Renaming
+  or moving a file changes its id. Two files that would share an id, such as `routes/loop.gpx` and
+  `routes/loop.fit`, fail the build.
+- **Every file is parsed by the app's own loaders**, so what the catalog says
+  (duration, TSS, distance, ascent) is what the ride will be. A file that does
+  not parse, or sits in the wrong folder, is reported and left out. The rest
+  still builds. Dot-files such as `.DS_Store` are ignored.
+- A workout's title is its `<name>`, or the file name with `_` and `-` turned
+  into spaces when it has none.
+- Summaries are worked out at 100% FTP. A `.fit` workout that gives absolute
+  watts rather than % FTP is summarised as if FTP were 250 W. Its duration is
+  exact, but its TSS and zone times are only as right as that guess. Riding it
+  is unaffected.
+
+### Plans
+
+A plan is a folder in `content/plans/`. There is no plan file to write: the
+workouts in the folder are the plan, in order.
+
+```
+content/plans/
+  GCN_Zero_to_Hero_Plan/        → plan "GCN Zero to Hero Plan"
+    Intro.zwo                   1  (the folder's own files come first)
+    Week_2/2_1_Endurance.zwo    2  under the heading "Week 2"
+    Week_2/2_2_Tempo.zwo        3
+    Week_10/Taper.zwo           4  under "Week 10", after Week 2
+  Your_First_Century/           → a flat plan
+    TP_FirstCentury_1_7.zwo     1
+    TP_FirstCentury_2_1.zwo     2
+    TP_FirstCentury_10_1.zwo    3
+```
+
+- **Order:** by sub-folder first. Within a sub-folder:
+  - **When every title in the plan is numbered** (`Week 1.3 - …`,
+    `Phase 2.1 - …`, `1.3 …`), by that number. Many Zwift plans number their
+    titles but not their file names.
+  - **Otherwise by file name.** Comparison is natural, so `_2_1` comes before
+    `_10_1` and `Week_2` before `Week_10`, and case is ignored.
+  - **A plan with only some numbered titles** keeps file order.
+- **Titles:** plan titles and sub-folder headings show `_` as spaces.
+- **Plan workouts are ordinary workouts too.** Each is listed in the Library's
+  Workouts section, tagged with its plan's title, with an id such as
+  `workout:plans/GCN_Zero_to_Hero_Plan/Week_2/2_1_Endurance`.
+- **The sub-folder goes in front of the title** outside the plan's own
+  headings, in Workouts, Up next and the summary: `Week 12 · Anaerobic #2`.
+  This is skipped when the title already names its week (`Week 1.4 - …`).
+- **Problems are reported, never fatal:**
+  - A plan workout that does not parse is left out of its plan. Zwift plans
+    contain many of these: rest days and swim or run sessions with no blocks
+    at all.
+  - A plan with nothing readable left is left out.
+  - A file placed directly in `plans/`, such as an old `.json` plan, is
+    skipped.
+
+### Building and previewing
+
+```sh
+npm run catalog:build   # content/ → .catalog/ (gitignored); prints counts and anything left out
+npm run dev:catalog     # builds, then runs the dev server reading the catalog from .catalog/
+```
+
+`catalog:build` exits non-zero only when the build fails as a whole, which
+means an id collision. `dev:catalog` serves `.catalog/` at `/catalog/`
+through a dev-only Vite plugin, so a catalog can be tried before it is
+published.
+
+### The bucket layout
+
+```
+index.json              cached for 60 s
+files/<sha256>.<ext>    cached for a year, immutable
+```
+
+Files are stored under the SHA-256 of their bytes. An edited file gets a new
+key, so a cached copy can never be stale, and the app checks each file's hash
+after download as well. The index is versioned. An app that meets an index
+of a newer major version says so and carries on without the catalog.
+
+### Publishing the catalog
+
+One-time set-up, with the same Cloudflare login as the relay:
+
+```sh
+npx wrangler login                                   # if not already
+npx wrangler r2 bucket create cycle-indoors-catalog
+npx wrangler r2 bucket dev-url enable cycle-indoors-catalog   # prints the public https://pub-….r2.dev URL
+npx wrangler r2 bucket cors set cycle-indoors-catalog --file scripts/catalog/r2-cors.json
+```
+
+Then put the public URL in `src/catalog/config.ts` (`DEFAULT_CATALOG_URL`)
+and deploy the app. The CORS rules allow GET and HEAD from the Pages site
+and the dev server. Edit `scripts/catalog/r2-cors.json` and run the `cors set`
+again to add an origin. The r2.dev URL is rate-limited and meant for light
+use. A custom domain (`wrangler r2 bucket domain add`) is the upgrade, and
+only changes that one URL.
+
+After that, every publish is:
+
+```sh
+npm run catalog:sync -- --dry-run   # what would be uploaded and deleted; changes nothing
+npm run catalog:sync
+```
+
+Sync builds first and uploads nothing if the build fails. It reads the
+bucket's current `index.json` and uploads only files that index does not
+list, 4 at a time. It uploads the new `index.json` only once every file it
+points to is in place, then deletes the files nothing points to any more.
+If an upload fails, the old index stays live and riders keep a whole
+catalog. If the content has not changed, it uploads nothing. Set
+`CATALOG_BUCKET` to publish to a different bucket. A `403: Forbidden` means
+the bucket does not exist yet, or Wrangler's login has no R2 access
+(`npx wrangler r2 bucket list` tells which).
 
 ## Testing
 
@@ -623,6 +869,126 @@ curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.d
   second upload on reopening, the button with auto-upload off, a duplicate, a
   failure that can be retried, Upload while disconnected connecting first,
   and an unticked permission.
+- **catalog-index** — the index check: a newer major version is refused as
+  "needs a newer version of the app", minor versions pass, and damaged
+  indexes (no version, a route without a file, an id of the wrong kind) are
+  refused. Catalog URLs join with or without a trailing slash, and are
+  absent when no catalog is configured.
+- **catalog-summary** — workout summaries against hand calculations: a
+  steady hour at 75% is TSS 56.25 and all Z2, a 50→100% ramp splits 60/240/
+  180/120 s across Z1–Z4, and 30 min at 100% plus 30 min free riding is TSS
+  50 with the free half in no zone. Route summaries equal the ride screen's
+  `Course` for the sample route, a 2 000-point route thins to 200 evenly
+  spaced points, and a Cyrillic name survives.
+- **catalog-build** — the builder on files shaped like real Zwift exports
+  (`pace="0"` attributes, SteadyState with PowerLow/PowerHigh): ids from
+  paths, tags from folders, title fallback, a truncated XML file and a
+  one-point route reported while the rest builds, wrong-folder files skipped,
+  dot-files invisible, content-hash keys shared by identical bytes and
+  changed by an edit, and an id collision failing the build naming both files.
+- **catalog-plans** — plans as folders:
+  - a flat plan ordered `1_7`, `1_10`, `2_1`, `10_1` regardless of case;
+  - a plan with sub-folders: top-level files first, `Week_2` before
+    `Week_10`, and nested folders as one group;
+  - plan workouts as ordinary entries (id, plan tag, group, file);
+  - numbered titles (`Week 1.3`) ordering a plan whose file names do not,
+    with plain and half-numbered titles keeping file order;
+  - the sub-folder shown in front of a title, except when the title already
+    names its week;
+  - totals that are the sum of the plan's workouts;
+  - several plans in natural order;
+  - a loose `.json`, a wrong-type file and a broken workout each reported
+    without failing the build;
+  - empty and unreadable plans left out;
+  - a `workouts/plans/` path that clashes with a plan workout failing the
+    build naming both files.
+- **catalog-parity** — `.zwo`, FIT workout, `.gpx` and FIT route files built
+  into an index and loaded through `loadFile` at a different FTP: duration,
+  block count, distance, ascent and name agree for every one.
+- **catalog-sync** — sync against a stand-in bucket that records every call:
+  an empty bucket, an unchanged catalog (only the index is read), an edit
+  (new file, then the index, then the old file deleted, in that order), a
+  removal, cache headers on files and on the index, an upload failing midway
+  (the index never written, the old one intact, nothing deleted, no new
+  uploads started), a dry run that only reads, a failed build or an
+  unreadable bucket index refusing to start, and a failed delete reported
+  without failing the sync.
+- **catalog-client** — the catalog client against a stand-in fetch: the index
+  revalidated (`no-cache`), kept until a fresh load is asked for, and a file
+  fetched by its key and hash-checked. Offline, a 404, a non-JSON body, a
+  newer version, a damaged index and no catalog configured are each reported
+  rather than thrown. A file that is tampered with, missing or unreachable
+  throws with a message the rider can act on.
+- **library-filter** — search over titles, authors and tags with every word
+  required, the source and tag filters, inclusive and open-ended ranges, and
+  when the filters count as narrowing a section. The built-in workouts as
+  entries. The thumbnails' geometry: widths by duration, heights by % FTP
+  against the workout's own peak, blocks meeting end to end, zone colours,
+  free riding grey and low, a route's summit highest and a flat route at
+  mid-height.
+- **library-view** — the Library booted in the real app with a stand-in
+  catalog:
+  - nothing fetched at boot, and Browse library opening Workouts;
+  - six built-in and two catalog workouts labelled by source;
+  - a description containing markup shown as text with its line breaks;
+  - blocks in watts at the current FTP;
+  - search, the empty state and Clear filters, and filters restored in a new
+    Library;
+  - Ride on a catalog workout giving the same segments as loading the file
+    directly;
+  - a failed download and a hash mismatch leaving the ride's workout alone;
+  - a route loaded as the course;
+  - a plan's workouts in order under their headings, plan search, Ride from
+    a plan, and the plan tag in Workouts listing exactly that plan's
+    workouts;
+  - Ride buttons disabled during a ride, even against a forced click;
+  - an unreachable catalog with built-in workouts still listed and Retry
+    bringing it back;
+  - a catalog that never answers blocking nothing.
+- **library-db** — the IndexedDB store on `fake-indexeddb`: a file added,
+  the same bytes again only touching it, most-recent-first order, bytes and
+  summaries intact across a new connection, touch and remove, one database
+  at version 2 with `done`, `files` and `plan` stores, and an open that errors or
+  throws (a private window) or no IndexedDB at all giving a harmless
+  unavailable store. It also covers done marks with their time, a My library
+  file's mark removed with it, following and replacing a plan across a new
+  connection, and a version 1 database upgraded with its files kept.
+- **library-plans** — plan progress: none done, the next after two, skipping
+  ahead without moving Up next past an undone workout, complete, a mark for a
+  workout no longer in the plan, and an empty plan never complete.
+- **done-marks** — done marks and following in the booted app, over a
+  stand-in IndexedDB and catalog:
+  - marking from a workout's details, the Done badge, search showing which
+    match is done, and the Done filter both ways;
+  - a mark made in Workouts counted by its plan, a plan row marked and
+    unmarked, and the filter applied to plan details;
+  - following a plan, with Up next on the Workout panel and in the Plans
+    section, advancing, complete, and back to the first undone workout;
+  - riding Up next, then Mark as done on the summary;
+  - closing the summary marks nothing;
+  - a file dropped mid-ride replacing the offer, and no workout offering
+    nothing;
+  - switching plans keeping marks, and Stop following;
+  - an unpublished plan and an unreachable catalog each explained.
+- **up-next-boot** — a followed plan with a catalog that never answers: boot
+  still loads the first built-in workout, Up next says it is loading, and a
+  ride can start.
+- **personal-library** — My library in the booted app, over a stand-in
+  IndexedDB:
+  - dropped files kept once with their names, bytes and summaries;
+  - a broken file shown as an error and not kept;
+  - persistence asked for once, and no network request at any point;
+  - a FIT file with steps and GPS kept once and listed as both, and an
+    indoor ride kept as neither;
+  - kept entries listed and filterable as My library, and loaded at a
+    changed FTP;
+  - Remove asking first, Cancel keeping the entry, and Remove deleting it
+    while the ride keeps its course.
+- **personal-unavailable** — the same app with storage refused: the file
+  still loads, the rider is told it was not kept, and the Library says My
+  library is unavailable while still listing the built-in workouts. Mark as
+  done is disabled with the reason, and the summary offers no mark for the
+  unkept file.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and forward-only seeking (the Jump group holds only
