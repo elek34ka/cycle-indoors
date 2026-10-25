@@ -1,0 +1,12 @@
+name = "cycle-indoors-strava-relay"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+STRAVA_CLIENT_ID = "290716"
+# Browser Origin headers are scheme + host + port; the Pages subpath is never part of them.
+APP_ORIGINS = "https://elek34ka.github.io,http://127.0.0.1:5173,http://localhost:5173"
+
+# STRAVA_CLIENT_SECRET is a secret, not a var:
+#   production: npx wrangler secret put STRAVA_CLIENT_SECRET
+#   local dev:  relay/.dev.vars (gitignored)

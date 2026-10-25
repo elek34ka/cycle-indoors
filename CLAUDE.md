@@ -11,7 +11,7 @@ for the things the code and the README do not say.
 
 ```sh
 npm run dev      # http://127.0.0.1:5173 — run it in your own terminal, Ctrl+C stops it
-npm test         # ~650 checks, no browser needed; must be green before any deploy
+npm test         # ~1300 checks, no browser needed; must be green before any deploy
 npm run build    # tsc --noEmit + vite build into dist/
 ```
 
@@ -45,6 +45,8 @@ verify:
   and gives every element a 320x200 box so Leaflet's zoom maths works.
 - BLE is tested against `tests/fake-gatt.ts`, a stand-in GATT stack. Real
   trainers have never been connected to this code.
+- The Strava relay (`relay/src/index.ts`) is tested against a stand-in
+  `fetch` in `tests/strava-relay.test.ts`; Strava itself is never called.
 - FIT encoding and decoding are validated against Garmin's own `@garmin/fitsdk`,
   which independently confirms field numbers, scaling and CRC. Keep doing that
   for any new FIT field — it is the only thing standing between a plausible
@@ -107,4 +109,11 @@ pair precisely so the drawing code and the hit test cannot drift apart.
 - `src/session/session.ts` — owns every trainer write and throttles them
   (one per 500 ms, latest wins). New control paths belong here, not in the UI.
 - `src/activity/fit-export.ts` — already produces an upload-ready activity, so
-  a Strava integration needs a server for the OAuth secret, not new encoding.
+  the Strava integration needs no new encoding.
+- `relay/` — the Strava token relay (Cloudflare Worker), already deployed and
+  verified with a real authorization code. Strava requires `client_secret` for
+  the code exchange *and* every refresh (access tokens last 6 h, refresh tokens
+  rotate) and has no PKCE, so this is not optional. It only ever handles
+  tokens; the browser uploads to Strava directly. Never put the secret
+  anywhere but `wrangler secret put` or the gitignored `relay/.dev.vars`.
+  Strava's API base moves to `https://api-v3.strava.com` from 2027-01-04.

@@ -9,15 +9,18 @@ export as a `.fit` activity.
 
 Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/Auuki)).
 
-Frontend only — no backend, no accounts, nothing leaves the browser. Settings
-live in `localStorage`; rides are kept in memory until you download them.
+Frontend only — no accounts, nothing leaves the browser. Settings live in
+`localStorage`; rides are kept in memory until you download them. The one
+server-side piece is `relay/`, a stateless Cloudflare Worker that holds the
+Strava client secret for the upload integration being built (see
+[Strava token relay](#strava-token-relay)); the app does not call it yet.
 
 ## Running it
 
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # 1123 checks, no browser needed
+npm test           # ~1300 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -308,7 +311,8 @@ unavailable while a ride is running or paused.
 ### What is deliberately not here yet
 
 No ride history or workout library persistence, no
-account, no upload integrations, no power meter zero-offset calibration, no
+account, no upload integrations (the Strava relay is deployed; the app side is
+not built), no power meter zero-offset calibration, no
 virtual-gear or steering support.
 
 ## Layout
@@ -328,6 +332,7 @@ src/
                trackers, GATT transport with reconnect, pairing
   ui/          app shell, ride view, power graph, elevation graph, mini map,
                summary, settings + devices, route smoother
+relay/        Strava token relay — a Cloudflare Worker, deployed on its own
 tests/         node-run suites (FIT round-trip, parsers, full app boot in jsdom)
 samples/       a workout and a route to try the loaders on
 ```
@@ -346,6 +351,61 @@ Two seams matter for the phases ahead:
   through a command queue (one write per 500 ms, latest value wins). Real BLE
   control points drop commands when flooded, so this is where that is handled
   rather than in each device.
+
+## Strava token relay
+
+Strava's OAuth token exchange and every token refresh require the app's client
+secret, and Strava offers no PKCE or other flow for browser-only apps — so a
+static site cannot connect to Strava on its own. `relay/src/index.ts` is the
+smallest thing that fixes that: a Cloudflare Worker (free plan) that adds the
+secret to those two calls and nothing else.
+
+```
+browser ── {code} or {refresh_token} ──▶ relay ── + client_secret ──▶ strava.com/oauth/token
+browser ◀── access_token, refresh_token, expires_at, scope ──────────────────┘
+browser ── POST /api/v3/uploads (Bearer token, .fit) ─────────────────────▶ Strava, direct
+```
+
+- **Stateless.** No storage, no logs of request bodies. The athlete profile in
+  Strava's reply is dropped; only the tokens, expiry and scope come back.
+- **Ride files never pass through it.** Strava's API sends
+  `Access-Control-Allow-Origin: *`, so the browser uploads directly.
+- **Origin allow-list** (`APP_ORIGINS` in `relay/wrangler.toml`): the Pages
+  site and the dev server. It stops other sites' pages from using the relay
+  through a visitor's browser; it is not access control, and does not need to
+  be — a code is only useful for this app's own client id.
+- Bad input is a 400 before Strava is contacted, Strava's own errors are passed
+  through with its status, and an unreachable Strava is a 502.
+
+Live at `https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev`
+for Strava app `290716`, whose **Authorization Callback Domain** is
+`elek34ka.github.io` (`localhost` and `127.0.0.1` are always allowed, so the
+dev server needs nothing extra).
+
+### Deploying it
+
+The secret never goes in the repo: in production it is a Worker secret, and
+locally it lives in the gitignored `relay/.dev.vars`.
+
+```sh
+cd relay
+npm install                                    # wrangler, kept out of the app's dependencies
+npx wrangler login
+npx wrangler secret put STRAVA_CLIENT_SECRET   # paste at the hidden prompt
+npm run deploy
+
+cp .dev.vars.example .dev.vars                 # then paste the secret; for `npm run dev` on :8787
+```
+
+A freshly created `workers.dev` subdomain fails TLS for a few minutes while its
+certificate is issued. To check a deploy, a made-up code must come back as
+Strava's own `400 … AuthorizationCode invalid`:
+
+```sh
+curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev \
+     -H "Origin: http://127.0.0.1:5173" -H "content-type: application/json" \
+     -d '{"code":"nope"}'
+```
 
 ## Testing
 
@@ -488,6 +548,12 @@ Two seams matter for the phases ahead:
   either a `Uint8Array` or a `DataView`, characteristics named, the oldest
   dropped past the limit, and an empty log that says so. A switched-off log
   records nothing and gives its memory back.
+- **strava-relay** — the Worker against a stand-in Strava: unlisted or missing
+  origins, `GET` and malformed bodies are refused without reaching Strava; a
+  code exchange and a refresh each carry the client id and secret with the
+  right grant type; the reply keeps the tokens, expiry and scope, drops the
+  athlete and never echoes the secret; Strava's errors and an unreachable
+  Strava reach the app with CORS headers intact.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and forward-only seeking (the Jump group holds only

@@ -7,3 +7,7 @@ dist
 CLAUDE.local.md
 openspec
 .claude
+
+# Strava relay: local secret and Wrangler state
+relay/.dev.vars
+relay/.wrangler

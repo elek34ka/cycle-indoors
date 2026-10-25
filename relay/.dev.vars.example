@@ -1,0 +1,2 @@
+# Copy to .dev.vars (gitignored) for `npm run dev` in this folder.
+STRAVA_CLIENT_SECRET=paste-the-secret-from-strava.com/settings/api
