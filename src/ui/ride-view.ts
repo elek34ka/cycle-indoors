@@ -11,7 +11,7 @@ import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
 import { loadFile } from '../loaders';
 import type { PersonalLibrary } from '../library/personal';
-import { rememberEntry, type LoadedEntry } from '../library/loaded';
+import { rememberEntry, rememberRoute, type LoadedEntries } from '../library/loaded';
 import { blockLabel } from '../workout/targets';
 import type { Workout } from '../workout/types';
 import { clear, el, qs, setClass, setParts, setText, toast, type SubPart } from './dom';
@@ -453,16 +453,17 @@ export class RideView {
    * source parses alike. Returns whether anything was loaded; on failure the
    * ride's workout and route are left as they were.
    */
-  async loadFromSource(file: File, origin: LoadOrigin, entry?: LoadedEntry): Promise<boolean> {
+  async loadFromSource(file: File, origin: LoadOrigin, entry?: LoadedEntries): Promise<boolean> {
     try {
       const result = await loadFile(file, { ftp: settings.current.ftp });
-      if (result.workout && entry) rememberEntry(result.workout, entry);
+      if (result.workout && entry?.workout) rememberEntry(result.workout, entry.workout);
       if (result.workout) {
         session.loadWorkout(result.workout);
         toast(`Loaded "${result.workout.name}" — ${hhmmss(result.workout.duration)}`);
       }
       if (result.track) {
         const course = courseStore.load(result.track);
+        if (course && entry?.route) rememberRoute(course, entry.route);
         if (course) {
           toast(`Route "${course.name}" — ${(course.totalDistance / 1000).toFixed(1)} km, ${Math.round(course.totalAscent)} m up`);
         } else {
@@ -479,7 +480,10 @@ export class RideView {
         const kept = await this.personal.keep(file, result);
         // Now it is a My library entry, and can be marked done after the ride.
         if (result.workout && kept.sha256) {
-          rememberEntry(result.workout, { key: `mine:${kept.sha256}`, title: kept.workoutTitle ?? result.workout.name });
+          rememberEntry(result.workout, { key: `mine:${kept.sha256}`, title: kept.workoutTitle ?? result.workout.name, sha256: kept.sha256 });
+        }
+        if (courseStore.current && result.track && kept.sha256 && courseStore.track === result.track) {
+          rememberRoute(courseStore.current, { key: `mine:${kept.sha256}`, title: courseStore.current.name, sha256: kept.sha256 });
         }
         if (kept.outcome === 'unavailable' || kept.outcome === 'failed') {
           toast('Loaded, but it could not be saved to My library — browser storage is unavailable or full.', 'error');

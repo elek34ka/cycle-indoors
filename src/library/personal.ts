@@ -3,7 +3,7 @@ import { summariseRoute, summariseWorkout } from '../catalog/summary';
 import { Emitter } from '../core/pubsub';
 import { baseName, type LoadResult } from '../loaders';
 import { UNTITLED_WORKOUT } from '../workout/zwo';
-import type { LibraryStore, StoredFile, StoredRoute, StoredWorkout } from './db';
+import type { LibraryStore, RideLogEntry, StoredFile, StoredProfile, StoredRef, StoredRoute, StoredWorkout } from './db';
 
 /** What happened to a file the rider loaded. */
 export type KeepOutcome = 'added' | 'updated' | 'not-a-workout-or-route' | 'unavailable' | 'failed';
@@ -102,6 +102,76 @@ export class PersonalLibrary extends Emitter<{ change: void }> {
   /** Follows a plan, replacing any other, or stops following. */
   async follow(planId: string | undefined): Promise<void> {
     await (await this.store).follow(planId);
+    this.emit('change', undefined);
+  }
+
+  /** My library files known from a restored backup but not on this device.
+   *  Empty when storage is unavailable. */
+  async refs(): Promise<StoredRef[]> {
+    try { return await (await this.store).refs(); } catch { return []; }
+  }
+
+  /** Forgets a reference, and its done mark with it. */
+  async removeRef(sha: string): Promise<void> {
+    await (await this.store).removeRef(sha);
+    this.emit('change', undefined);
+  }
+
+  /** The ride log, newest first. Empty when storage is unavailable. */
+  async rides(): Promise<RideLogEntry[]> {
+    try { return await (await this.store).rides(); } catch { return []; }
+  }
+
+  /** Logs a finished ride. Never throws: a ride log that cannot be written
+   *  must not get in the way of the summary. */
+  async logRide(entry: RideLogEntry): Promise<boolean> {
+    try {
+      const store = await this.store;
+      if (!store.available) return false;
+      await store.logRide(entry);
+      this.emit('change', undefined);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Links a logged ride to its Strava activity. Never throws. */
+  async setRideStrava(startedAt: number, activityId: number): Promise<void> {
+    try {
+      await (await this.store).setRideStrava(startedAt, activityId);
+      this.emit('change', undefined);
+    } catch { /* the link is a convenience */ }
+  }
+
+  async removeRide(startedAt: number): Promise<void> {
+    await (await this.store).removeRide(startedAt);
+    this.emit('change', undefined);
+  }
+
+  /** Everything a backup takes from the database: My library as references
+   *  (kept files without their bytes, and the references already here), done
+   *  marks, the followed plan and the ride log. Throws when storage is
+   *  unavailable, so an empty browser never passes for an empty profile. */
+  async snapshot(): Promise<StoredProfile> {
+    const store = await this.store;
+    if (!store.available) throw new Error('this browser is not letting the app store anything');
+    const [files, refs, done, followed, rides] = await Promise.all([
+      store.list(), store.refs(), store.doneMarks(), store.followed(), store.rides(),
+    ]);
+    return {
+      done,
+      ...(followed ? { followed } : {}),
+      library: [...files.map(({ bytes: _, ...ref }) => ref), ...refs],
+      rides,
+    };
+  }
+
+  /** Replaces the profile in the database, all or nothing (a restore). */
+  async replace(profile: StoredProfile): Promise<void> {
+    const store = await this.store;
+    if (!store.available) throw new Error('this browser is not letting the app store anything');
+    await store.replaceProfile(profile);
     this.emit('change', undefined);
   }
 

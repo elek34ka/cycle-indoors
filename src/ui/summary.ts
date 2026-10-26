@@ -7,8 +7,10 @@ import { strava, StravaNotConnected, type UploadResult } from '../activity/strav
 import { clear, el, qs, toast } from './dom';
 import { confirmDialog } from './confirm';
 import { connectStrava } from './strava-panel';
-import { entryFor, type LoadedEntry } from '../library/loaded';
+import { entryFor, routeEntryFor, type LoadedEntry } from '../library/loaded';
 import type { PersonalLibrary } from '../library/personal';
+import { courseStore } from '../activity/course-store';
+import { rideLogEntry } from '../ride-log/entry';
 
 /** Strava uploads by ride start time, so reopening a summary neither repeats
  *  an upload nor loses track of one still in flight. */
@@ -66,6 +68,18 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
   const metrics = computeMetrics(samples, ftp);
   const title = snapshot.workout?.name ?? 'Free ride';
   const startedAt = session.startedAt ?? new Date();
+
+  if (personal) {
+    const course = courseStore.current;
+    const logged = rideLogEntry({
+      startedAt,
+      metrics,
+      ...(snapshot.workout ? { workout: { title, entry: entryFor(snapshot.workout) } } : {}),
+      ...(course ? { route: { name: course.name, entry: routeEntryFor(course) } } : {}),
+    });
+    // Keyed by start time, so a summary shown again logs the same ride once.
+    if (logged) void personal.logRide(logged);
+  }
 
   const card = el('div', { class: 'summary-card' });
 
@@ -159,7 +173,7 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
         },
       },
     }),
-    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName })) : null,
+    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName }), personal) : null,
     download,
   ]));
 
@@ -175,6 +189,7 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
 function stravaButton(
   startedAt: Date,
   ride: () => { bytes: Uint8Array; name: string; fileName: string },
+  personal?: PersonalLibrary,
 ): HTMLElement {
   const key = startedAt.getTime();
   const slot = el('span', { class: 'strava-slot' });
@@ -196,7 +211,7 @@ function stravaButton(
         class: 'btn',
         text: state?.busy ?? 'Upload to Strava',
         disabled: Boolean(state?.busy),
-        on: { click: () => void uploadRide(key, ride, true) },
+        on: { click: () => void uploadRide(key, ride, true, personal) },
       }));
     }
   };
@@ -209,7 +224,7 @@ function stravaButton(
   render();
 
   if (settings.current.stravaAutoUpload && strava.status === 'connected' && !uploads.has(key)) {
-    void uploadRide(key, ride, false);
+    void uploadRide(key, ride, false, personal);
   }
   return slot;
 }
@@ -218,6 +233,7 @@ async function uploadRide(
   key: number,
   ride: () => { bytes: Uint8Array; name: string; fileName: string },
   fromClick: boolean,
+  personal?: PersonalLibrary,
 ): Promise<void> {
   if (uploads.has(key)) return;
   const set = (state: UploadState | undefined) => {
@@ -233,6 +249,8 @@ async function uploadRide(
     const { bytes, name, fileName } = ride();
     const result = await strava.upload(bytes, { name, externalId: fileName }, (busy) => set({ busy }));
     set({ result });
+    // The ride log links to the activity, whether new or one Strava already had.
+    if (result.kind !== 'processing' && result.activityId !== undefined) void personal?.setRideStrava(key, result.activityId);
     // Safe on Strava, so discarding the ride no longer loses it.
     if (session.startedAt?.getTime() === key) session.markExported();
     toast(result.kind === 'created' ? 'Uploaded to Strava.'

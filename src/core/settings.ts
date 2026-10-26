@@ -53,6 +53,48 @@ const DEFAULTS: Settings = {
 
 const KEY = 'cycle-indoors.settings.v1';
 
+/**
+ * Settings that describe this device rather than the rider: never backed up,
+ * and left alone by a restore. Every other setting is personal and travels
+ * with the backup. A test lists every key, so a new setting has to be put on
+ * one side or the other on purpose.
+ */
+export const DEVICE_SETTINGS = [
+  'miniMapPosition',
+  'useMockDevices',
+  'autoConnectBle',
+  'debugMode',
+  'librarySection',
+  'libraryFilters',
+  // Strava is connected per browser, so whether to upload to it is too.
+  'stravaAutoUpload',
+] as const satisfies readonly (keyof Settings)[];
+
+type DeviceKey = (typeof DEVICE_SETTINGS)[number];
+export type PersonalSettings = Omit<Settings, DeviceKey>;
+export type DeviceSettings = Pick<Settings, DeviceKey>;
+
+const isDevice = (key: string) => (DEVICE_SETTINGS as readonly string[]).includes(key);
+
+/** The settings a backup carries. */
+export function personalSettings(value: Settings): PersonalSettings {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !isDevice(key))) as PersonalSettings;
+}
+
+/** The settings a restore leaves as they are. */
+export function deviceSettings(value: Settings): DeviceSettings {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => isDevice(key))) as DeviceSettings;
+}
+
+/** A backup's settings over this device's own: personal fields from the
+ *  backup (defaults for any it lacks, nothing it adds), device fields from
+ *  `current`. */
+export function settingsFromBackup(current: Settings, backup: Partial<Settings>): Settings {
+  const known = Object.keys(DEFAULTS);
+  const personal = Object.fromEntries(Object.entries(backup ?? {}).filter(([key]) => known.includes(key) && !isDevice(key)));
+  return restoreSettings({ ...personalSettings(DEFAULTS), ...personal, ...deviceSettings(current) });
+}
+
 /** Saved settings over the defaults. The smoother's preset name is worked out
  *  again from its values, because the presets' values have moved since some
  *  settings were saved; the values themselves are kept as they were. */

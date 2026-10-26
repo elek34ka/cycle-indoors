@@ -1,6 +1,6 @@
 import type { EntrySource, RouteItem, WorkoutItem } from './entries';
 
-export type LibrarySection = 'workouts' | 'routes' | 'plans';
+export type LibrarySection = 'workouts' | 'routes' | 'plans' | 'rides';
 
 /** What the rider has narrowed the Library to. A null bound is no bound. */
 export interface LibraryFilters {
@@ -74,8 +74,9 @@ export function tagsOf(items: { tags: string[] }[]): string[] {
   return [...new Set(items.flatMap((i) => i.tags))].sort((a, b) => a.localeCompare(b));
 }
 
-/** Whether any filter narrows the given section. */
+/** Whether any filter narrows the given section. My rides has no filters. */
 export function isFiltered(f: LibraryFilters, section: LibrarySection): boolean {
+  if (section === 'rides') return false;
   const base = f.search.trim() !== '' || f.source !== 'all' || f.tag !== '';
   if (section === 'workouts') return base || f.minMinutes !== null || f.maxMinutes !== null || f.done !== 'any';
   if (section === 'routes') return base || [f.minKm, f.maxKm, f.minAscent, f.maxAscent].some((v) => v !== null);

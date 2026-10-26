@@ -123,10 +123,12 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   the suite or the catalog script imports must read it as
   `import.meta.env?.X` (see `src/catalog/config.ts`).
 - **One IndexedDB database, `cycle-indoors`** (`src/library/db.ts`), now at
-  version 2: `files` (My library, keyed by SHA-256), `plan` (the followed
-  plan) and `done` (done marks, keyed by Library entry key). Version 1 is in
-  the owner's browser; the upgrade handler only creates missing stores, so it
-  keeps its files. A new feature that needs storage, such as ride
+  version 3: `files` (My library, keyed by SHA-256), `plan` (the followed
+  plan), `done` (done marks, keyed by Library entry key), `rides` (the ride
+  log, keyed by start time) and `refs` (My library files known from a
+  restored backup but not on this device, keyed by SHA-256). Versions 1 and
+  2 are in real browsers; the upgrade handler only creates missing stores,
+  so it keeps their data. A new feature that needs storage, such as ride
   persistence, bumps `DB_VERSION` and adds its stores in the upgrade
   handler; it must not open a second database.
 - **Done marks are keyed by Library entry** (`catalog:workout:<path>`,
@@ -139,6 +141,28 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   open: a refused browser gets `UNAVAILABLE_STORE`, and the UI says so.
   Tests use `fake-indexeddb`'s `IDBFactory` passed in explicitly, never its
   `auto` import, which would leak a global into every later test file.
+- **Backups are a profile of references, never bytes** (`src/backup/`). A
+  backup holds done marks, the followed plan, personal settings, the ride
+  log and My library as `StoredRef`s (no `bytes`). Never add Strava tokens:
+  they rotate, and a restored copy would log the other browser out. Never
+  add the recovery key either.
+- **Restore is a full replace in one transaction** (`replaceProfile` in
+  `db.ts`), never a merge, at the owner's choice. It deletes My library
+  files the backup does not reference. The transaction aborts explicitly
+  on any error, because a put that throws would otherwise let the writes
+  before it commit. Backing up is just as blunt: the vault's `PUT` has no
+  preconditions, so the last backup wins.
+- **Settings are personal or device-only** (`DEVICE_SETTINGS` in
+  `settings.ts`). `tests/backup-profile.test.ts` lists every key, so a new
+  setting fails the suite until it is put on one side on purpose.
+- **The recovery key's check symbols are a weighted sum mod 1021, not a
+  hash.** That guarantees every single-symbol typo and every swap of
+  neighbours is caught; a 10-bit hash let about one in a thousand through.
+  The suite tries them all.
+- **The vault bucket (`cycle-indoors-vault`) is private and separate from
+  the public catalog bucket.** Never point the vault at the catalog bucket,
+  and never give it r2.dev access. `vault/` is a separate Worker from
+  `relay/`, which stays stateless.
 - **Reading from an R2 bucket that does not exist returns `403: Forbidden`**,
   not a 404 (confirmed 2026-10-25: the same login read fine once the bucket
   was created). A 403 can also mean a login without R2 access. A missing *object* is "The

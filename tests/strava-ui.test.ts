@@ -1,3 +1,4 @@
+import { IDBFactory } from 'fake-indexeddb';
 import { setupDom } from './dom-setup';
 const dom = setupDom();
 // Node's FormData only takes Node's Blob; nothing here needs jsdom's.
@@ -10,6 +11,8 @@ const { showSummary } = await import('../src/ui/summary');
 const { strava, STRAVA, CALLBACK_CHANNEL } = await import('../src/activity/strava');
 const { settings } = await import('../src/core/settings');
 const { session } = await import('../src/session/session');
+const { openLibraryStore, UNAVAILABLE_STORE } = await import('../src/library/db');
+const { PersonalLibrary } = await import('../src/library/personal');
 type SessionSnapshot = import('../src/session/session').SessionSnapshot;
 
 const doc = dom.window.document;
@@ -67,6 +70,11 @@ function finishedRide(start: Date): SessionSnapshot {
 
 buildStravaPanel();
 
+// The ride log, which the summary writes and links to Strava.
+const personal = new PersonalLibrary(openLibraryStore(new IDBFactory()));
+const logged = () => personal.rides();
+const loggedRide = async (start: Date) => (await logged()).find((r) => r.startedAt === start.getTime());
+
 suite('the panel starts disconnected', () => {
   check('offers Connect to Strava', Boolean(panelButton('Connect to Strava')));
   check('says the approval lasts', /approve once in this browser/.test(panel().textContent ?? ''));
@@ -97,9 +105,11 @@ suite('connecting from Settings', () => {
   box.dispatchEvent(new dom.window.Event('change'));
 }
 const rideA = new Date('2026-10-25T07:00:00');
-showSummary(finishedRide(rideA));
+showSummary(finishedRide(rideA), personal);
 const autoDone = await until(() => summaryStrava()?.tagName === 'A');
 const link = summaryStrava() as HTMLAnchorElement | null;
+await until(() => false, 50);
+const rideALogged = await loggedRide(rideA);
 
 suite('auto-upload on finish', () => {
   check('the setting is saved', settings.current.stravaAutoUpload === true);
@@ -111,26 +121,49 @@ suite('auto-upload on finish', () => {
   check('no pop-up was needed', popups.length === 1);
 });
 
-showSummary(finishedRide(rideA));
+suite('the ride log', () => {
+  check('the finished ride is logged', rideALogged !== undefined && rideALogged.duration >= 119 && rideALogged.avgPower === 200,
+    JSON.stringify(rideALogged));
+  check('a free ride names no workout', rideALogged?.workout === undefined);
+  check('and links to the Strava activity once uploaded', rideALogged?.stravaActivityId === 4242);
+});
+
+showSummary(finishedRide(rideA), personal);
 await wait(30);
+const afterReopen = await logged();
 suite('reopening that summary', () => {
   check('does not upload it again', uploadsPosted() === 1, String(uploadsPosted()));
   check('still links to the activity', summaryStrava()?.textContent === 'View on Strava');
+  check('does not log the ride twice', afterReopen.length === 1 && afterReopen[0].stravaActivityId === 4242, String(afterReopen.length));
 });
 
 settings.patch({ stravaAutoUpload: false });
 uploadReply = () => Response.json({ id: 2, error: "x.fit duplicate of <a href='/activities/99'>Ride</a>" });
-showSummary(finishedRide(new Date('2026-10-25T08:00:00')));
+const rideB = new Date('2026-10-25T08:00:00');
+showSummary(finishedRide(rideB), personal);
 await wait(30);
 const waitedForClick = uploadsPosted() === 1 && summaryStrava()?.textContent === 'Upload to Strava';
 summaryStrava()!.click();
 const dupDone = await until(() => summaryStrava()?.textContent === 'Already on Strava');
+await until(() => false, 50);
+const rideBLogged = await loggedRide(rideB);
 
 suite('auto-upload off', () => {
   check('the ride waits for the button', waitedForClick);
   check('pressing it uploads', uploadsPosted() === 2, String(uploadsPosted()));
   check('a duplicate links to the ride already there',
     dupDone && summaryStrava()?.getAttribute('href') === 'https://www.strava.com/activities/99');
+  check('and the ride log links to it too', rideBLogged?.stravaActivityId === 99);
+});
+
+// Storage the browser refuses: the summary is unaffected, and nothing is logged.
+const refused = new PersonalLibrary(Promise.resolve(UNAVAILABLE_STORE));
+showSummary(finishedRide(new Date('2026-10-25T08:30:00')), refused);
+await wait(30);
+const refusedRides = await refused.rides();
+suite('a ride log that cannot be written', () => {
+  check('does not stop the summary', doc.querySelector('#summary-overlay .summary-grid') !== null);
+  check('and logs nothing', refusedRides.length === 0);
 });
 
 uploadReply = () => new Response('', { status: 500 });

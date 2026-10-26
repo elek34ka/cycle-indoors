@@ -46,6 +46,13 @@ const offered = doc.querySelector('#summary-overlay .summary-mark-done') !== nul
 hideSummary();
 session.reset();
 
+doc.querySelector<HTMLButtonElement>('#tabs [data-tab="library"]')!.click();
+await settle();
+doc.querySelector<HTMLButtonElement>('#library-root .lib-sections [data-section="rides"]')!.click();
+await settle();
+const ridesText = doc.querySelector('#library-root .lib-list')?.textContent ?? '';
+settings.patch({ librarySection: 'workouts' });
+
 suite('storage the browser will not give', () => {
   check('the file still loads', doc.querySelector('#workout-meta h3')?.textContent === 'Private');
   check('the rider is told it could not be kept', toasts.some((t) => /could not be saved to My library/.test(t)), toasts.join(' | '));
@@ -55,6 +62,7 @@ suite('storage the browser will not give', () => {
   check('Mark as done is disabled', toggle.disabled);
   check('with the reason shown', /cannot be saved in this browser/.test(doneNote), doneNote);
   check('a file that could not be kept is not offered for marking', !offered);
+  check('My rides says the ride log is unavailable', /ride log is unavailable/.test(ridesText), ridesText);
 });
 
 report();

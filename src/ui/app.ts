@@ -13,6 +13,8 @@ import { RideView } from './ride-view';
 import { RouteSmootherView } from './route-smoother-view';
 import { buildSettingsView } from './settings-view';
 import { buildStravaPanel } from './strava-panel';
+import { buildBackupPanel } from './backup-panel';
+import { browserBackup, type Backup } from '../backup/backup';
 import { showSummary } from './summary';
 import { qs, toast } from './dom';
 
@@ -23,6 +25,8 @@ export interface BootOptions {
   catalog?: CatalogClient;
   /** My library's storage; tests pass one over a stand-in IndexedDB */
   store?: Promise<LibraryStore>;
+  /** the backup; tests pass one over a stand-in vault */
+  backup?: (personal: PersonalLibrary) => Backup;
 }
 
 export function bootApp(options: BootOptions = {}): void {
@@ -31,6 +35,7 @@ export function bootApp(options: BootOptions = {}): void {
   const rideView = new RideView((snapshot) => showSummary(snapshot, personal), personal);
   buildSettingsView();
   buildStravaPanel();
+  buildBackupPanel(options.backup?.(personal) ?? browserBackup(personal, settings));
   new RouteSmootherView();
   new DevicesView();
   keepScreenAwake(navigator, document);

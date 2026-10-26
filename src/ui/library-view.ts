@@ -1,10 +1,12 @@
-import { hhmmss, mmss } from '../core/format';
+import { hhmmss, km, mmss, stamp } from '../core/format';
 import { settings } from '../core/settings';
 import { zoneForRatio } from '../core/zones';
 import { CatalogClient, type IndexResult } from '../catalog/client';
 import { displayName } from '../catalog/names';
 import type { CompactBlock, PlanEntry } from '../catalog/types';
-import type { StoredFile } from '../library/db';
+import { courseStore } from '../activity/course-store';
+import { activityUrl } from '../activity/strava';
+import type { RideLogEntry, StoredFile, StoredRef } from '../library/db';
 import {
   SOURCE_LABELS, builtinWorkouts, catalogPlans, catalogRoutes, catalogWorkouts, mineRoutes, mineWorkouts,
   type EntrySource, type RouteItem, type WorkoutItem,
@@ -14,8 +16,9 @@ import {
   NO_FILTERS, filterRoutes, filterWorkouts, isFiltered, passesDone, tagsOf,
   type DoneFilter, type LibraryFilters, type LibrarySection,
 } from '../library/filter';
-import type { LoadedEntry } from '../library/loaded';
+import type { LoadedEntries } from '../library/loaded';
 import { planProgress } from '../library/plans';
+import { entryHash, replayOf, type Found } from '../ride-log/replay';
 import { session } from '../session/session';
 import { targetText } from '../workout/targets';
 import type { Segment } from '../workout/types';
@@ -29,8 +32,8 @@ import { RouteSmootherView } from './route-smoother-view';
 export interface LibraryHost {
   loadBuiltin(id: string): boolean;
   /** `entry` is the Library entry the file is, so a finished ride can offer
-   *  to mark it done */
-  loadFile(file: File, origin: LoadOrigin, entry?: LoadedEntry): Promise<boolean>;
+   *  to mark it done and the ride log can name it */
+  loadFile(file: File, origin: LoadOrigin, entry?: LoadedEntries): Promise<boolean>;
   showRide(): void;
 }
 
@@ -40,6 +43,7 @@ const SECTIONS: { key: LibrarySection; label: string }[] = [
   { key: 'workouts', label: 'Workouts' },
   { key: 'routes', label: 'Routes' },
   { key: 'plans', label: 'Plans' },
+  { key: 'rides', label: 'My rides' },
 ];
 
 /** The sources each section can list. */
@@ -47,6 +51,7 @@ const SECTION_SOURCES: Record<LibrarySection, EntrySource[]> = {
   workouts: ['builtin', 'catalog', 'mine'],
   routes: ['catalog', 'mine'],
   plans: ['catalog'],
+  rides: [],
 };
 
 
@@ -54,6 +59,11 @@ const planMeta = (p: PlanEntry) =>
   `${p.totals.workouts} workouts · ${Math.round(p.totals.duration / 360) / 10} h · TSS ${Math.round(p.totals.tss)}`;
 const workoutMeta = (w: WorkoutItem) => `${hhmmss(w.duration)} · TSS ${Math.round(w.tss)} · IF ${w.if.toFixed(2)}`;
 const routeMeta = (r: RouteItem) => `${(r.distance / 1000).toFixed(1)} km · ${Math.round(r.ascent)} m up`;
+const rideKey = (r: RideLogEntry) => `ride:${r.startedAt}`;
+/** What a logged ride was: its workout, else its route, else a free ride. */
+const rideTitle = (r: RideLogEntry) => r.workout?.title ?? r.route?.name ?? 'Free ride';
+const rideMeta = (r: RideLogEntry) =>
+  `${hhmmss(r.duration)} · ${km(r.distance)} km · ${Math.round(r.avgPower)} W · TSS ${Math.round(r.tss)}`;
 
 /** A compact block's target as the ride screen writes it: "180–240 W (60–80%)". */
 function blockTarget(block: CompactBlock, ftp: number): string {
@@ -74,10 +84,14 @@ export class LibraryView {
   private loadingKey: string | undefined;
   /** My library's files; `mineAvailable` is unknown until the store opens */
   private mine: StoredFile[] = [];
+  /** My library entries from a restored backup whose files are not here */
+  private absent: StoredRef[] = [];
   private mineAvailable: boolean | undefined;
   /** done marks by entry key → when (unix ms) */
   private done = new Map<string, number>();
   private followedPlan: string | undefined;
+  /** the ride log, newest first */
+  private rides: RideLogEntry[] = [];
 
   private sectionButtons = new Map<LibrarySection, HTMLButtonElement>();
   private statusNode: HTMLElement;
@@ -167,8 +181,10 @@ export class LibraryView {
     if (!this.personal) return;
     this.mineAvailable = await this.personal.available();
     this.mine = await this.personal.entries();
+    this.absent = await this.personal.refs();
     this.done = await this.personal.doneMarks();
     this.followedPlan = await this.personal.followed();
+    this.rides = await this.personal.rides();
     // Up next needs the followed plan from the catalog. Fetched in the
     // background, and only when a plan is followed: boot never waits on it.
     if (this.followedPlan && this.catalog.status === 'idle') void this.refreshCatalog(false);
@@ -182,9 +198,11 @@ export class LibraryView {
   // ---- entries -------------------------------------------------------------
 
   private workouts(): WorkoutItem[] {
-    return [...builtinWorkouts(), ...catalogWorkouts(this.index), ...mineWorkouts(this.mine)];
+    return [...builtinWorkouts(), ...catalogWorkouts(this.index), ...mineWorkouts(this.mine), ...mineWorkouts(this.absent, true)];
   }
-  private routes(): RouteItem[] { return [...catalogRoutes(this.index), ...mineRoutes(this.mine)]; }
+  private routes(): RouteItem[] {
+    return [...catalogRoutes(this.index), ...mineRoutes(this.mine), ...mineRoutes(this.absent, true)];
+  }
   private plans(): PlanEntry[] { return catalogPlans(this.index); }
 
   private isDone = (key: string) => this.done.has(key);
@@ -229,6 +247,8 @@ export class LibraryView {
     clear(this.filtersNode);
     this.tagSelect = undefined;
     for (const [key, button] of this.sectionButtons) button.classList.toggle('on', key === this.section);
+    // My rides is a plain log: nothing to search or filter yet.
+    if (this.section === 'rides') return;
     const f = this.filters;
     const patch = (partial: Partial<LibraryFilters>) => settings.patch({ libraryFilters: { ...this.filters, ...partial } });
 
@@ -321,6 +341,16 @@ export class LibraryView {
       const shown = filterRoutes(all, f);
       for (const r of shown) this.listNode.append(this.routeRow(r));
       if (shown.length === 0) this.listNode.append(this.emptyRow(all.length, 'routes'));
+    } else if (this.section === 'rides') {
+      for (const r of this.rides) this.listNode.append(this.rideRow(r));
+      if (this.rides.length === 0) {
+        this.listNode.append(el('li', {
+          class: 'empty lib-empty',
+          text: this.mineAvailable === false
+            ? 'The ride log is unavailable — this browser is not letting the app store it.'
+            : 'No rides yet. Every ride of a minute or more is logged here when you press Finish.',
+        }));
+      }
     } else {
       const all = this.plans();
       const words = f.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -349,10 +379,11 @@ export class LibraryView {
     return el('li', { class: 'empty lib-empty', text: `No ${noun} yet.${why}` });
   }
 
-  private tags(source: EntrySource, tags: string[], doneKey?: string): HTMLElement {
+  private tags(source: EntrySource, tags: string[], doneKey?: string, absent = false): HTMLElement {
     return el('div', { class: 'lib-tags' }, [
       doneKey ? this.doneBadge(doneKey) : null,
       el('span', { class: 'lib-source', text: SOURCE_LABELS[source] }),
+      absent ? el('span', { class: 'lib-absent-tag', text: 'Not on this device' }) : null,
       ...tags.map((t) => el('span', { class: 'lib-tag', text: t })),
     ]);
   }
@@ -389,9 +420,11 @@ export class LibraryView {
     }
   }
 
-  private row(key: string, profile: Element, title: string, meta: string, tags: HTMLElement, ride?: () => void): HTMLElement {
+  private row(
+    key: string, profile: Element, title: string, meta: string, tags: HTMLElement, ride?: () => void, absent = false,
+  ): HTMLElement {
     const li = el('li', {
-      class: `lib-item${this.selected[this.section] === key ? ' selected' : ''}`,
+      class: `lib-item${this.selected[this.section] === key ? ' selected' : ''}${absent ? ' lib-absent' : ''}`,
       dataset: { key },
       on: { click: () => { this.selected[this.section] = key; this.renderContent(); } },
     }, [
@@ -414,11 +447,13 @@ export class LibraryView {
   }
 
   private workoutRow(w: WorkoutItem): HTMLElement {
-    return this.row(w.key, workoutProfileSvg(w.blocks), w.title, workoutMeta(w), this.tags(w.source, w.tags, w.key), () => void this.ride(w, w.title));
+    return this.row(w.key, workoutProfileSvg(w.blocks), w.title, workoutMeta(w), this.tags(w.source, w.tags, w.key, w.absent),
+      w.absent ? undefined : () => void this.ride(w, w.title), w.absent);
   }
 
   private routeRow(r: RouteItem): HTMLElement {
-    return this.row(r.key, routeProfileSvg(r.profile), r.name, routeMeta(r), this.tags(r.source, r.tags), () => void this.ride(r, r.name));
+    return this.row(r.key, routeProfileSvg(r.profile), r.name, routeMeta(r), this.tags(r.source, r.tags, undefined, r.absent),
+      r.absent ? undefined : () => void this.ride(r, r.name), r.absent);
   }
 
   private planRow(p: PlanEntry): HTMLElement {
@@ -432,10 +467,27 @@ export class LibraryView {
       this.tags('catalog', []));
   }
 
+  /** A logged ride: its date where the others have a profile. */
+  private rideRow(r: RideLogEntry): HTMLElement {
+    const day = new Date(r.startedAt);
+    const date = el('div', { class: 'lib-plan-weeks lib-ride-date' }, [
+      el('strong', { text: String(day.getDate()) }),
+      el('span', { text: day.toLocaleDateString(undefined, { month: 'short' }) }),
+    ]);
+    return this.row(rideKey(r), date, rideTitle(r), `${stamp(day)} · ${rideMeta(r)}`,
+      el('div', { class: 'lib-tags' }, [r.stravaActivityId !== undefined ? el('span', { class: 'lib-tag', text: 'On Strava' }) : null]));
+  }
+
   private renderDetail(): void {
     clear(this.detailNode);
     const key = this.selected[this.section];
     if (this.section !== 'routes') this.closeSmoother();
+    if (this.section === 'rides') {
+      const r = this.rides.find((x) => rideKey(x) === key);
+      if (r) { this.rideDetail(r, this.replay(r)); return; }
+      this.detailNode.append(el('div', { class: 'empty', text: 'Select a ride to see it here.' }));
+      return;
+    }
     if (this.section === 'workouts') {
       const w = this.workouts().find((x) => x.key === key);
       if (w) { this.workoutDetail(w); return; }
@@ -473,7 +525,7 @@ export class LibraryView {
       el('h2', { text: w.title }),
       el('div', { class: 'lib-meta', text: workoutMeta(w) }),
       w.author ? el('div', { class: 'lib-author', text: `by ${w.author}` }) : null,
-      this.tags(w.source, w.tags, w.key),
+      this.tags(w.source, w.tags, w.key, w.absent),
       workoutProfileSvg(w.blocks, 600, 96, 'lib-profile-large'),
       this.actions(w, w.title),
       // textContent, never innerHTML: descriptions come from other people's files
@@ -483,12 +535,13 @@ export class LibraryView {
     );
   }
 
-  /** Ride, and for My library entries, Remove. */
+  /** Ride, and for My library entries, Remove. An entry whose file is not on
+   *  this device can only be marked or removed. */
   private actions(item: WorkoutItem | RouteItem, title: string): HTMLElement {
-    const row = el('div', { class: 'lib-actions' }, [this.rideButton(item.key, () => void this.ride(item, title), true)]);
+    const row = el('div', { class: 'lib-actions' }, item.absent ? [] : [this.rideButton(item.key, () => void this.ride(item, title), true)]);
     // Routes are not workouts: only workouts are marked done.
     if ('title' in item) row.append(this.doneToggle(item.key));
-    else row.append(this.smoothButton(item));
+    else if (!item.absent) row.append(this.smoothButton(item));
     if ('title' in item && !this.canMark) {
       row.append(el('span', { class: 'lib-done-note', text: 'Done marks cannot be saved in this browser.' }));
     }
@@ -498,14 +551,112 @@ export class LibraryView {
         on: { click: () => void this.remove(item, title) },
       }));
     }
+    if (item.absent) {
+      row.append(el('span', {
+        class: 'lib-absent-note',
+        text: `This file came with a restored backup and is not on this device. Load ${item.fileName ?? 'it'} again to ride it.`,
+      }));
+    }
     return row;
+  }
+
+  /** A logged ride's numbers and what was ridden. A log of numbers: there is
+   *  no ride to reopen, only its Strava activity when it has one. */
+  private rideDetail(r: RideLogEntry, replay: ReturnType<LibraryView['replay']>): void {
+    const line = (label: string, value: string) =>
+      el('li', {}, [el('span', { text: label }), el('strong', { text: value })]);
+    this.fillDetail(
+      el('h2', { text: rideTitle(r) }),
+      el('div', { class: 'lib-meta', text: stamp(new Date(r.startedAt)) }),
+      el('ul', { class: 'lib-ride-numbers' }, [
+        line('Duration', hhmmss(r.duration)),
+        line('Distance', `${km(r.distance)} km`),
+        line('Avg power', `${Math.round(r.avgPower)} W`),
+        line('Normalised', `${Math.round(r.normalisedPower)} W`),
+        line('TSS', String(Math.round(r.tss))),
+        r.avgHr !== undefined ? line('Avg HR', `${r.avgHr} bpm`) : null,
+        r.ascent > 0 ? line('Climbed', `${Math.round(r.ascent)} m`) : null,
+      ].filter((n) => n !== null)),
+      el('div', { class: 'lib-actions' }, [
+        r.workout || r.route ? this.replayButton(r, replay.ready) : null,
+        r.stravaActivityId !== undefined
+          ? el('a', {
+            class: 'btn lib-ride-strava', text: 'View on Strava',
+            attrs: { href: activityUrl(r.stravaActivityId), target: '_blank', rel: 'noopener' },
+          })
+          : null,
+        el('button', {
+          type: 'button', class: 'btn btn-danger lib-remove', text: 'Remove from My rides',
+          on: { click: () => void this.removeRide(r) },
+        }),
+      ]),
+      r.workout ? this.ridePreview('workout', r.workout.title, replay.workout!) : null,
+      r.route ? this.ridePreview('route', r.route.name, replay.route!) : null,
+    );
+  }
+
+  /** What Ride same session would load: by key, else by file hash. */
+  private replay(r: RideLogEntry) {
+    return replayOf(r, this.workouts(), this.routes(), this.catalog.status === 'done');
+  }
+
+  /** A logged ride's workout or route as today's Library has it. */
+  private ridePreview(kind: 'workout' | 'route', title: string, found: Found<WorkoutItem> | Found<RouteItem>): HTMLElement {
+    const head = el('div', { class: 'panel-head', text: kind === 'workout' ? 'Workout' : 'Route' });
+    const box = (...nodes: (Node | null)[]) => el('div', { class: `lib-ride-preview lib-ride-${kind}`, dataset: { status: found.status } },
+      [head, ...nodes]);
+    if (found.status === 'pending') return box(el('div', { class: 'lib-meta', text: `Looking for “${title}”…` }));
+    if (found.status === 'missing') {
+      return box(
+        el('div', { class: 'lib-ride-missing', text: `No ${kind} found` }),
+        el('div', { class: 'lib-meta', text: `“${title}” is no longer in the Library or My library.` }),
+      );
+    }
+    const item = found.item;
+    const profile = 'title' in item ? workoutProfileSvg(item.blocks, 600, 72, 'lib-profile-large')
+      : routeProfileSvg(item.profile, 600, 72, 'lib-profile-large');
+    return box(
+      el('div', { class: 'lib-title', text: 'title' in item ? item.title : item.name }),
+      el('div', { class: 'lib-meta', text: 'title' in item ? workoutMeta(item) : routeMeta(item) }),
+      profile,
+      found.status === 'absent'
+        ? el('div', { class: 'lib-ride-missing', text: `This ${kind} is not on this device. Load ${item.fileName ?? 'its file'} again to ride it.` })
+        : null,
+    );
+  }
+
+  /** Loads what the ride had, and only that. Disabled unless all of it is here. */
+  private replayButton(r: RideLogEntry, ready: boolean): HTMLButtonElement {
+    return el('button', {
+      type: 'button', class: 'btn btn-primary lib-replay', text: 'Ride same session',
+      dataset: { key: rideKey(r), ready: String(ready) },
+      disabled: !ready || this.rideLocked() || this.loadingKey !== undefined,
+      on: { click: () => void this.rideSameSession(r) },
+    }) as HTMLButtonElement;
+  }
+
+  private async removeRide(r: RideLogEntry): Promise<void> {
+    const confirmed = await confirmDialog({
+      title: 'Remove this ride?',
+      message: `"${rideTitle(r)}" on ${stamp(new Date(r.startedAt))} will no longer be listed in My rides. `
+        + 'Done marks and the activity on Strava are not touched.',
+      confirmText: 'Remove',
+      danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      await this.personal?.removeRide(r.startedAt);
+      delete this.selected.rides;
+    } catch (err) {
+      toast(`Could not remove it: ${(err as Error).message}`, 'error');
+    }
   }
 
   private routeDetail(r: RouteItem): void {
     this.fillDetail(
       el('h2', { text: r.name }),
       el('div', { class: 'lib-meta', text: `${routeMeta(r)} · starts ${r.start[0].toFixed(4)}, ${r.start[1].toFixed(4)}` }),
-      this.tags(r.source, r.tags),
+      this.tags(r.source, r.tags, undefined, r.absent),
       routeProfileSvg(r.profile, 600, 96, 'lib-profile-large'),
       this.actions(r, r.name),
       r.key === this.smoothKey ? this.smoother?.host ?? null : null,
@@ -635,6 +786,12 @@ export class LibraryView {
       button.textContent = loading ? 'Loading…' : 'Ride';
       button.title = locked ? 'A ride is in progress' : '';
     }
+    for (const button of Array.from(this.root.querySelectorAll<HTMLButtonElement>('.lib-replay'))) {
+      const ready = button.dataset.ready === 'true';
+      button.disabled = !ready || locked || this.loadingKey !== undefined;
+      button.textContent = button.dataset.key === this.loadingKey ? 'Loading…' : 'Ride same session';
+      button.title = !ready ? 'Its workout or route is not in the Library' : locked ? 'A ride is in progress' : '';
+    }
   }
 
   // ---- loading -------------------------------------------------------------
@@ -714,7 +871,7 @@ export class LibraryView {
       // A ride may have started while the file was on its way.
       if (this.rideLocked()) throw new Error('a ride started in the meantime');
       const loaded = await this.host.loadFile(new File([bytes as BlobPart], item.fileName), item.source === 'mine' ? 'mine' : 'catalog',
-        'title' in item ? { key: item.key, title } : undefined);
+        loadedEntries(item, title));
       if (loaded && item.source === 'mine') void this.personal?.used(item.id);
       if (loaded) this.host.showRide();
     } catch (err) {
@@ -725,24 +882,80 @@ export class LibraryView {
     }
   }
 
-  /** Forgets a kept file. Whatever is loaded on the ride stays loaded. */
+  /**
+   * Ride same session: the logged ride's workout and route, loaded as the
+   * Library's Ride would, and nothing else. A ride that had no workout is
+   * free riding again, and one that had no route has none. Every file is
+   * fetched before anything changes, so a failure leaves the ride as it was.
+   */
+  private async rideSameSession(r: RideLogEntry): Promise<void> {
+    if (this.rideLocked() || this.loadingKey !== undefined) return;
+    const replay = this.replay(r);
+    if (!replay.ready) return;
+    const workout = replay.workout?.status === 'found' ? replay.workout.item : undefined;
+    const route = replay.route?.status === 'found' ? replay.route.item : undefined;
+    // A My library FIT file that was both is loaded once, as both.
+    const routeToo = route !== undefined && route.key === workout?.key;
+    this.loadingKey = rideKey(r);
+    this.renderRideState();
+    try {
+      const fetchFor = async (item: WorkoutItem | RouteItem | undefined) =>
+        item && item.source !== 'builtin' && item.fileName ? new File([await this.entryBytes(item) as BlobPart], item.fileName) : undefined;
+      const [workoutFile, routeFile] = await Promise.all([fetchFor(workout), routeToo ? undefined : fetchFor(route)]);
+      if (this.rideLocked()) throw new Error('a ride started in the meantime');
+      const origin = (item: WorkoutItem | RouteItem) => (item.source === 'mine' ? 'mine' : 'catalog');
+      if (workout) {
+        const loaded = workout.source === 'builtin' ? this.host.loadBuiltin(workout.id)
+          : workoutFile !== undefined && await this.host.loadFile(workoutFile, origin(workout), loadedEntries(workout, workout.title, routeToo));
+        if (!loaded) return;
+      }
+      if (route && !routeToo) {
+        if (!routeFile || !await this.host.loadFile(routeFile, origin(route), loadedEntries(route, route.name))) return;
+      }
+      // Same session: what it did not have, it does not get either.
+      if (!workout) session.loadWorkout(undefined);
+      if (!route) courseStore.unload();
+      for (const item of [workout, route]) if (item?.source === 'mine') void this.personal?.used(item.id);
+      this.host.showRide();
+    } catch (err) {
+      toast(`Could not load "${rideTitle(r)}": ${(err as Error).message}`, 'error');
+    } finally {
+      this.loadingKey = undefined;
+      this.renderRideState();
+    }
+  }
+
+  /** Forgets a kept file, or an entry not on this device. Whatever is loaded
+   *  on the ride stays loaded. */
   private async remove(item: WorkoutItem | RouteItem, title: string): Promise<void> {
-    const both = this.mine.find((f) => f.sha256 === item.id);
+    const both = [...this.mine, ...this.absent].find((f) => f.sha256 === item.id);
     const confirmed = await confirmDialog({
       title: 'Remove from My library?',
-      message: `"${title}" will no longer be kept in this browser`
-        + `${both?.workout && both.route ? ', as a workout or as a route' : ''}. `
-        + 'The file on your computer is not touched, and a ride that has it loaded keeps it.',
+      message: item.absent
+        ? `"${title}" will no longer be listed in My library${both?.workout && both.route ? ', as a workout or as a route' : ''}.`
+        : `"${title}" will no longer be kept in this browser`
+          + `${both?.workout && both.route ? ', as a workout or as a route' : ''}. `
+          + 'The file on your computer is not touched, and a ride that has it loaded keeps it.',
       confirmText: 'Remove',
       danger: true,
     });
     if (!confirmed) return;
     try {
-      await this.personal?.remove(item.id);
+      if (item.absent) await this.personal?.removeRef(item.id);
+      else await this.personal?.remove(item.id);
       delete this.selected[this.section];
       this.renderContent();
     } catch (err) {
       toast(`Could not remove it: ${(err as Error).message}`, 'error');
     }
   }
+}
+
+/** What a Library load tells the ride about the file, so the summary can
+ *  offer a done mark and the ride log can find it again. A My library FIT
+ *  workout can carry its route too, under the one key. */
+function loadedEntries(item: WorkoutItem | RouteItem, title: string, routeToo = item.source === 'mine'): LoadedEntries {
+  const sha256 = entryHash(item);
+  const entry = { key: item.key, title, ...(sha256 ? { sha256 } : {}) };
+  return 'title' in item ? { workout: entry, ...(routeToo ? { route: entry } : {}) } : { route: entry };
 }

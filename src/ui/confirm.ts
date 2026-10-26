@@ -4,7 +4,8 @@ export interface ConfirmOptions {
   title: string;
   message: string;
   confirmText: string;
-  cancelText?: string;
+  /** null for a notice, with only the confirm button */
+  cancelText?: string | null;
   /** styles the confirm button as destructive */
   danger?: boolean;
 }
@@ -31,7 +32,7 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
       if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); close(true); }
     };
 
-    const cancel = el('button', {
+    const cancel = options.cancelText === null ? null : el('button', {
       class: 'btn', text: options.cancelText ?? 'Cancel',
       on: { click: () => close(false) },
     });
@@ -54,6 +55,11 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
 
     document.addEventListener('keydown', onKey, true);
     qs('#app').append(overlay);
-    cancel.focus();
+    (cancel ?? confirm).focus();
   });
+}
+
+/** A modal with one button, for something the rider must read. */
+export async function noticeDialog(options: Omit<ConfirmOptions, 'cancelText' | 'danger'>): Promise<void> {
+  await confirmDialog({ ...options, cancelText: null });
 }

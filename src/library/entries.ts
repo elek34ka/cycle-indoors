@@ -3,7 +3,7 @@ import { summariseWorkout } from '../catalog/summary';
 import type { CatalogFile, CatalogIndex, PlanEntry, RouteSummary, WorkoutSummary } from '../catalog/types';
 import { LIBRARY } from '../workout/library';
 import { parseZwo } from '../workout/zwo';
-import type { StoredFile } from './db';
+import type { StoredRef } from './db';
 
 /** Where a Library entry comes from. */
 export type EntrySource = 'builtin' | 'catalog' | 'mine';
@@ -25,6 +25,9 @@ interface ItemBase {
   file?: CatalogFile;
   /** the file name to load it as, so the loader picks the right parser */
   fileName?: string;
+  /** a My library entry known from a restored backup whose file is not in
+   *  this browser: listed, but it cannot be ridden until the file is loaded */
+  absent?: boolean;
 }
 
 export interface WorkoutItem extends ItemBase, WorkoutSummary {
@@ -81,15 +84,17 @@ export function catalogPlans(index: CatalogIndex | undefined): PlanEntry[] {
 }
 
 /** My library's workouts: the kept files that are workouts, most recent first. */
-export function mineWorkouts(files: StoredFile[]): WorkoutItem[] {
+export function mineWorkouts(files: StoredRef[], absent = false): WorkoutItem[] {
   return files.filter((f) => f.workout).map((f) => ({
     ...f.workout!, key: `mine:${f.sha256}`, source: 'mine', id: f.sha256, tags: [], fileName: f.name,
+    ...(absent ? { absent } : {}),
   }));
 }
 
 /** My library's routes. A FIT file that is both is listed in both. */
-export function mineRoutes(files: StoredFile[]): RouteItem[] {
+export function mineRoutes(files: StoredRef[], absent = false): RouteItem[] {
   return files.filter((f) => f.route).map((f) => ({
     ...f.route!, key: `mine:${f.sha256}`, source: 'mine', id: f.sha256, tags: [], fileName: f.name,
+    ...(absent ? { absent } : {}),
   }));
 }

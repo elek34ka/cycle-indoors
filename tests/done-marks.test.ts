@@ -76,8 +76,13 @@ await settle();
 
 row(K.forty)!.click();
 const toggleBefore = lib('.lib-detail .lib-done-toggle')!.textContent;
+// The catalog has its own fetch; anything on the global one would be a mark leaving the browser.
+const realFetch = globalThis.fetch;
+let markRequests = 0;
+globalThis.fetch = (async () => { markRequests++; throw new TypeError('offline'); }) as typeof fetch;
 lib('.lib-detail .lib-done-toggle')!.click();
 await settle();
+globalThis.fetch = realFetch;
 const badge = row(K.forty)?.querySelector('.lib-done')?.textContent ?? '';
 const toggleAfter = lib('.lib-detail .lib-done-toggle')!.textContent;
 const storedAfterMark = await marksInStorage();
@@ -96,6 +101,7 @@ suite('marking in the Library', () => {
   check('the row shows Done with the date', /^Done \S+/.test(badge), badge);
   check('the details now offer Mark as not done', toggleAfter === 'Mark as not done', toggleAfter ?? '');
   check('the mark is in IndexedDB', storedAfterMark.join() === K.forty, storedAfterMark.join());
+  check('and no request carries it: no backup has been made', markRequests === 0);
   check('search shows which match is done', searchRows.length === 2
     && searchRows.find((r) => r.k === K.forty)?.done === true && searchRows.find((r) => r.k === K.short)?.done === false,
     JSON.stringify(searchRows));

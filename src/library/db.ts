@@ -2,15 +2,19 @@ import type { RouteSummary, WorkoutSummary } from '../catalog/types';
 
 /**
  * The app's one IndexedDB database. Version 1 holds My library (`files`) and
- * the followed plan (`plan`); version 2 adds done marks (`done`). A later
- * feature that needs storage (ride persistence) bumps the version and adds
- * its own stores in `upgrade`; it never opens a second database.
+ * the followed plan (`plan`); version 2 adds done marks (`done`); version 3
+ * adds the ride log (`rides`) and references to My library files that are
+ * not on this device (`refs`). A later feature that needs storage (ride
+ * persistence) bumps the version and adds its own stores in `upgrade`; it
+ * never opens a second database.
  */
 export const DB_NAME = 'cycle-indoors';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 const FILES = 'files';
 const PLAN = 'plan';
 const DONE = 'done';
+const RIDES = 'rides';
+const REFS = 'refs';
 const FOLLOWED = 'followed';
 
 export interface StoredWorkout extends WorkoutSummary {
@@ -38,6 +42,41 @@ export interface StoredFile {
 }
 
 export type NewFile = Omit<StoredFile, 'addedAt' | 'lastUsedAt'>;
+
+/** A My library file known from a restored backup but not on this device:
+ *  everything but the bytes. */
+export type StoredRef = Omit<StoredFile, 'bytes'>;
+
+/** A finished ride, as numbers only: never samples, a track or a file. */
+export interface RideLogEntry {
+  /** unix ms; the same key the summary uses for its Strava upload */
+  startedAt: number;
+  /** s */
+  duration: number;
+  /** m */
+  distance: number;
+  /** W */
+  avgPower: number;
+  normalisedPower: number;
+  tss: number;
+  avgHr?: number;
+  /** m */
+  ascent: number;
+  /** the Library entry ridden, when it came from the Library or My library,
+   *  and its file's content hash, so Ride same session can find it again */
+  workout?: { key?: string; sha256?: string; title: string };
+  route?: { key?: string; sha256?: string; name: string };
+  stravaActivityId?: number;
+}
+
+/** Everything a restore replaces in the database. */
+export interface StoredProfile {
+  done: DoneMark[];
+  followed?: string;
+  /** My library as references: files and refs alike */
+  library: StoredRef[];
+  rides: RideLogEntry[];
+}
 
 /** A workout the rider marked done, by Library entry key
  *  (`builtin:<id>`, `catalog:<id>`, `mine:<sha256>`). */
@@ -67,6 +106,22 @@ export interface LibraryStore {
   /** the followed plan's id, if any */
   followed(): Promise<string | undefined>;
   follow(planId: string | undefined): Promise<void>;
+  /** the ride log, newest first */
+  rides(): Promise<RideLogEntry[]>;
+  /** Logs a ride; logging the same start time again replaces it, keeping
+   *  its Strava link. */
+  logRide(entry: RideLogEntry): Promise<void>;
+  /** Links a logged ride to its Strava activity; an unknown ride is ignored. */
+  setRideStrava(startedAt: number, activityId: number): Promise<void>;
+  removeRide(startedAt: number): Promise<void>;
+  /** My library files not on this device, most recently used first */
+  refs(): Promise<StoredRef[]>;
+  /** Forgets a reference, and its done mark with it. */
+  removeRef(sha256: string): Promise<void>;
+  /** Replaces done marks, the followed plan, the ride log and My library with
+   *  `profile`, all or nothing. Kept files the profile lists keep their
+   *  bytes; every other kept file is deleted. */
+  replaceProfile(profile: StoredProfile): Promise<void>;
 }
 
 /** Storage the browser refused: private windows, blocked site data. */
@@ -81,6 +136,13 @@ export const UNAVAILABLE_STORE: LibraryStore = {
   setDone: async () => {},
   followed: async () => undefined,
   follow: async () => {},
+  rides: async () => [],
+  logRide: async () => {},
+  setRideStrava: async () => {},
+  removeRide: async () => {},
+  refs: async () => [],
+  removeRef: async () => {},
+  replaceProfile: async () => {},
 };
 
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
@@ -111,12 +173,14 @@ class IdbLibraryStore implements LibraryStore {
   }
 
   async save(file: NewFile): Promise<'added' | 'updated'> {
-    // One transaction, so two loads of the same file cannot both "add" it.
-    const tx = this.db.transaction(FILES, 'readwrite');
+    // One transaction, so two loads of the same file cannot both "add" it,
+    // and a file arriving for a reference replaces it in the same step.
+    const tx = this.db.transaction([FILES, REFS], 'readwrite');
     const store = tx.objectStore(FILES);
     const existing = await request(store.get(file.sha256) as IDBRequest<StoredFile | undefined>);
     const now = this.now();
     store.put(existing ? { ...existing, lastUsedAt: now } : { ...file, addedAt: now, lastUsedAt: now });
+    tx.objectStore(REFS).delete(file.sha256);
     await finished(tx);
     return existing ? 'updated' : 'added';
   }
@@ -161,6 +225,85 @@ class IdbLibraryStore implements LibraryStore {
     else tx.objectStore(PLAN).delete(FOLLOWED);
     await finished(tx);
   }
+
+  async rides(): Promise<RideLogEntry[]> {
+    const tx = this.db.transaction(RIDES, 'readonly');
+    const all = await request(tx.objectStore(RIDES).getAll() as IDBRequest<RideLogEntry[]>);
+    return all.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  async logRide(entry: RideLogEntry): Promise<void> {
+    const tx = this.db.transaction(RIDES, 'readwrite');
+    const store = tx.objectStore(RIDES);
+    // A summary shown again logs the ride again; it must not lose its Strava link.
+    const existing = await request(store.get(entry.startedAt) as IDBRequest<RideLogEntry | undefined>);
+    const activity = entry.stravaActivityId ?? existing?.stravaActivityId;
+    store.put(activity === undefined ? entry : { ...entry, stravaActivityId: activity });
+    await finished(tx);
+  }
+
+  async setRideStrava(startedAt: number, activityId: number): Promise<void> {
+    const tx = this.db.transaction(RIDES, 'readwrite');
+    const store = tx.objectStore(RIDES);
+    const ride = await request(store.get(startedAt) as IDBRequest<RideLogEntry | undefined>);
+    if (ride) store.put({ ...ride, stravaActivityId: activityId });
+    await finished(tx);
+  }
+
+  async removeRide(startedAt: number): Promise<void> {
+    const tx = this.db.transaction(RIDES, 'readwrite');
+    tx.objectStore(RIDES).delete(startedAt);
+    await finished(tx);
+  }
+
+  async refs(): Promise<StoredRef[]> {
+    const tx = this.db.transaction(REFS, 'readonly');
+    const all = await request(tx.objectStore(REFS).getAll() as IDBRequest<StoredRef[]>);
+    return all.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  }
+
+  async removeRef(sha256: string): Promise<void> {
+    const tx = this.db.transaction([REFS, DONE], 'readwrite');
+    tx.objectStore(REFS).delete(sha256);
+    tx.objectStore(DONE).delete(`mine:${sha256}`);
+    await finished(tx);
+  }
+
+  async replaceProfile(profile: StoredProfile): Promise<void> {
+    // One transaction: a restore that fails anywhere leaves every store as it was.
+    const tx = this.db.transaction([DONE, PLAN, RIDES, REFS, FILES], 'readwrite');
+    const done = finished(tx);
+    try {
+      const files = tx.objectStore(FILES);
+      const keys = await request(files.getAllKeys() as IDBRequest<string[]>);
+      const kept = new Set(profile.library.map((ref) => ref.sha256));
+      for (const sha of keys) if (!kept.has(sha)) files.delete(sha);
+      const here = new Set(keys);
+
+      const marks = tx.objectStore(DONE);
+      marks.clear();
+      for (const mark of profile.done) marks.put(mark);
+
+      const plan = tx.objectStore(PLAN);
+      if (profile.followed) plan.put({ planId: profile.followed }, FOLLOWED);
+      else plan.delete(FOLLOWED);
+
+      const rides = tx.objectStore(RIDES);
+      rides.clear();
+      for (const ride of profile.rides) rides.put(ride);
+
+      const refs = tx.objectStore(REFS);
+      refs.clear();
+      for (const ref of profile.library) if (!here.has(ref.sha256)) refs.put(ref);
+    } catch (err) {
+      // A put that throws (a malformed record) would otherwise let every
+      // write before it commit.
+      tx.abort();
+      await done.catch(() => {});
+      throw err;
+    }
+    await done;
+  }
 }
 
 /**
@@ -181,6 +324,8 @@ export async function openLibraryStore(
         if (!upgrading.objectStoreNames.contains(FILES)) upgrading.createObjectStore(FILES, { keyPath: 'sha256' });
         if (!upgrading.objectStoreNames.contains(PLAN)) upgrading.createObjectStore(PLAN);
         if (!upgrading.objectStoreNames.contains(DONE)) upgrading.createObjectStore(DONE, { keyPath: 'key' });
+        if (!upgrading.objectStoreNames.contains(RIDES)) upgrading.createObjectStore(RIDES, { keyPath: 'startedAt' });
+        if (!upgrading.objectStoreNames.contains(REFS)) upgrading.createObjectStore(REFS, { keyPath: 'sha256' });
       };
       open.onsuccess = () => {
         // A newer tab upgrading the database must not be blocked by this one.

@@ -11,6 +11,8 @@ openspec
 # Strava relay: local secret and Wrangler state
 relay/.dev.vars
 relay/.wrangler
+# Backup vault: Wrangler state (local R2 lives here under wrangler dev)
+vault/.wrangler
 
 # Catalog source files, synced to R2 by script, not committed
 content/

@@ -1,0 +1,24 @@
+name = "cycle-indoors-vault"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Browser Origin headers are scheme + host + port; the Pages subpath is never part of them.
+APP_ORIGINS = "https://elek34ka.github.io,http://127.0.0.1:5173,http://localhost:5173"
+
+# The private bucket for encrypted backups. Never the public catalog bucket.
+#   npx wrangler r2 bucket create cycle-indoors-vault   (leave r2.dev access off)
+[[r2_buckets]]
+binding = "VAULT"
+bucket_name = "cycle-indoors-vault"
+
+# Per client IP, per 60 s. Approximate and per data centre, which is enough here.
+[[ratelimits]]
+name = "WRITE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "READ_LIMITER"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }

@@ -7,6 +7,7 @@ const { bootApp } = await import('../src/ui/app');
 const { session } = await import('../src/session/session');
 const { settings } = await import('../src/core/settings');
 const { courseStore } = await import('../src/activity/course-store');
+const { routeEntryFor } = await import('../src/library/loaded');
 const { CatalogClient } = await import('../src/catalog/client');
 const { openLibraryStore } = await import('../src/library/db');
 const { PersonalLibrary } = await import('../src/library/personal');
@@ -58,6 +59,7 @@ await settle();
 drop('workout-drop', 'my_steady.zwo', STEADY);
 await settle();
 const afterDrops = await until(kept, (k) => k.length === 2);
+const droppedRouteEntry = routeEntryFor(courseStore.current)?.key;
 drop('workout-drop', 'broken.zwo', '<workout_file><workout>');
 await settle();
 const brokenToast = lastToast();
@@ -120,6 +122,8 @@ suite('My library in the Library', () => {
   check('Ride loads it and shows the ride', rideActive === true && doc.querySelector('#workout-meta h3')?.textContent === 'My steady hour');
   check('at the FTP in Settings now (280 W), not the FTP it was imported at', blockText.includes('280 W (100%)'), blockText);
   check('still no network', requests === 0);
+  check('a dropped route, once kept, is its My library entry for the ride log',
+    droppedRouteEntry !== undefined && droppedRouteEntry === `mine:${afterDrops.find((f) => f.route)?.sha256}`, droppedRouteEntry);
 });
 
 tab('library').click();

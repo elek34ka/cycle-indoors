@@ -14,6 +14,8 @@ const { loadFile } = await import('../src/loaders');
 const { hideSummary } = await import('../src/ui/summary');
 const { LIBRARY } = await import('../src/workout/library');
 const { readFileSync } = await import('node:fs');
+const { routeEntryFor } = await import('../src/library/loaded');
+const { parseGpx } = await import('../src/activity/gpx');
 type Workout = import('../src/workout/types').Workout;
 
 const doc = dom.window.document;
@@ -220,6 +222,15 @@ suite('routes', () => {
   check('tagged by folder', routeRow.querySelector('.lib-tag')?.textContent === 'georgia');
   check('Ride makes it the course', courseStore.current !== undefined && Math.round(courseStore.current.totalAscent) === Math.round(routeEntry.ascent));
   check('and shows the ride', active('ride'));
+  check('the course knows its Library entry, for the ride log',
+    routeEntryFor(courseStore.current)?.key === routeRow.dataset.key, routeEntryFor(courseStore.current)?.key);
+});
+
+// A route from anywhere else replaces the course, and with it the entry.
+courseStore.load(parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'elsewhere'));
+
+suite('a route loaded from elsewhere', () => {
+  check('has no Library entry', courseStore.current !== undefined && routeEntryFor(courseStore.current) === undefined);
 });
 
 tab('library').click();

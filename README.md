@@ -10,12 +10,14 @@ export as a `.fit` activity.
 Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/Auuki)).
 
 Frontend only — no accounts, and nothing leaves the browser unless you send a
-ride to Strava. Settings live in `localStorage`. Workouts and routes you load
-from files are kept in IndexedDB (My library). Rides are still kept only in
-memory until you download or upload them. The catalog is read from a public R2
-bucket. The one server-side piece is `relay/`, a stateless
-Cloudflare Worker that holds the Strava client secret (see
-[Strava token relay](#strava-token-relay)).
+ride to Strava or make an encrypted backup. Settings live in `localStorage`. Workouts and routes you load
+from files are kept in IndexedDB (My library), as is a log of finished rides'
+numbers (My rides). The rides themselves are still kept only in memory until
+you download or upload them. The catalog is read from a public R2
+bucket. There are two server-side pieces, both Cloudflare Workers: `relay/`,
+a stateless one that holds the Strava client secret (see
+[Strava token relay](#strava-token-relay)), and `vault/`, which stores
+encrypted backups it cannot read (see [Backup vault](#backup-vault)).
 
 ## Running it
 
@@ -417,7 +419,15 @@ a reload.
   untouched, and a ride that has it loaded keeps it.
 - On the first file kept, the app asks the browser to keep its storage
   persistent, so it is not evicted under pressure. The browser may refuse.
-- **Nothing in My library is sent anywhere.**
+- **Not on this device.** After a restore from a backup (see Backup), an
+  entry whose file this browser never had is listed greyed, with its done
+  mark, but has no Ride: a backup holds only a reference to the file, never
+  its bytes. Loading the same file again (same bytes, any name) turns it
+  into a normal entry. A different file with the same name is a new entry.
+  **Remove** forgets the reference and its mark.
+- **Nothing in My library is sent anywhere,** except a file's name, hash and
+  summary inside an encrypted backup you choose to make. File bytes never
+  leave the browser.
 - If the browser will not give the app storage (a private window, blocked
   site data, a full disk), files still load for that session. A message says
   the file could not be saved, and the Library says My library is
@@ -438,8 +448,8 @@ workout or My library.
   The **Done** filter (done or not, done, not done) narrows Workouts and a
   plan's workout list, and is remembered with the other filters.
 - **Storage:** marks live in IndexedDB, in this browser only. There are no
-  accounts, so they do not follow you to another device, and they are never
-  sent anywhere.
+  accounts. Marks reach another device only through an encrypted backup you
+  make and restore there, and are never sent anywhere else.
 - **A mark belongs to the Library entry, not the file's bytes.** An edited
   catalog workout keeps its mark. **Renaming or moving a catalog file resets
   it**, because the path is the id. A workout in two plans is marked
@@ -468,10 +478,90 @@ screen's Workout panel.
 - **Boot does not wait.** The catalog is fetched in the background, and only
   when a plan is followed.
 
+**My rides.** Every ride of a minute or more is logged when you press
+**Finish**, and listed newest first in the Library's **My rides** section.
+
+- **A log of numbers, not rides you can reopen.** Each entry keeps the
+  start time, duration, distance, average and normalised power, TSS,
+  average heart rate and metres climbed. It also keeps what was ridden: the
+  workout's title and the route's name, with their Library entries and
+  their files' content hashes when they came from the Library or My
+  library. It holds no samples, no GPS track and no `.fit` file. The ride
+  itself still lives only in memory until you download or upload it.
+- **Clicking a ride previews what was ridden:** its workout and its route,
+  with their profiles, as the Library has them today. They are looked up by
+  Library entry, else by content hash, so a renamed catalog file or the
+  same file kept in My library still counts. Nothing is fetched until a
+  ride is clicked.
+- **Ride same session** loads that workout and route and goes to the ride.
+  It loads only what that ride had: a ride without a route unloads the
+  current one, and a ride without a workout is free riding again.
+  - When a workout or route is not in the Library or My library any more,
+    the preview says **No workout found** or **No route found**, and the
+    button cannot be pressed.
+  - The same goes for a file listed as *not on this device*.
+  - A free ride has nothing to load, so it has no button.
+  - During a ride the button is disabled, like every Ride button.
+- **Strava.** Once a ride is uploaded (or Strava says it already has it),
+  its entry links to the activity with **View on Strava**.
+- **Shorter rides are not logged,** so a stray Start and Finish leaves
+  nothing behind. Showing a summary again does not log the ride twice.
+- **Remove** asks first. It removes the entry only: done marks and the
+  activity on Strava are untouched.
+- My rides has no search or filters yet. Without browser storage it says the
+  ride log is unavailable, and the summary works as before.
+
+**Backup.** A **Backup** panel on the Settings tab keeps your profile safe and
+brings it to another browser, encrypted with a recovery key only you hold.
+
+- **What a backup holds (your profile):**
+  - done marks and the followed plan;
+  - your personal settings;
+  - the My rides log;
+  - My library as references: each file's name, hash and summary.
+- **What it never holds:**
+  - file bytes, ride samples or `.fit` files;
+  - Strava's tokens;
+  - the recovery key;
+  - settings that belong to the device: the map position, simulated
+    devices, Bluetooth auto-connect, debug mode, Strava auto-upload, and the
+    Library's open section and filters.
+- **The recovery key** is made by the app (`ci1-` and nine groups of six),
+  never chosen. It is shown once with **Copy** and **Download .txt**. Before
+  the first backup you type its last group back, to prove you saved it.
+  **Lose the key and the backup is gone.** Nobody can recover it, because
+  nothing that leaves the browser can be turned back into it. The key is
+  remembered in this browser (not in settings, so **Reset to defaults** keeps
+  it) until you press **Forget on this device**.
+- **Everything is encrypted in the browser** (AES-GCM, with a key derived
+  from the recovery key) before it is sent. The service sees only ciphertext
+  and a token derived from the key. A mistyped key is caught by its check
+  symbols before any request is made.
+- **Store current profile to cloud** replaces the stored backup: **the last backup wins**,
+  whichever browser it came from.
+- **Retrieve profile from cloud fully replaces this device's profile.** There
+  is no merging.
+  - A pop-up first names the backup's date and what it holds, and warns that
+    anything on this device that is not in the backup will be lost. Nothing
+    changes unless you choose **Replace**.
+  - Done marks, the plan, settings, the ride log and My library become
+    exactly the backup's. **A My library file the backup does not reference
+    is deleted.**
+  - Files the backup references but this browser does not have show as
+    *not on this device*.
+  - Device settings and this browser's Strava connection are left alone.
+  - A second pop-up then says Strava must be connected separately.
+- **On a new device, restore before you back up,** or its empty profile
+  replaces your backup.
+- **Delete backup** removes it from the service.
+- Without a backup service configured, or in a browser without the needed
+  encryption, the panel says backup is unavailable. The service itself is
+  described under [Backup vault](#backup-vault).
+
 ### What is deliberately not here yet
 
-No ride history or ride persistence (so no upload retry across a reload),
-no calendar scheduling of plans, no account, no upload integrations beyond Strava, no power meter
+No ride history beyond the My rides log, no ride persistence (so no upload retry across a reload),
+no calendar scheduling of plans, no account (backups are keyed by a recovery key, not a login), no upload integrations beyond Strava, no power meter
 zero-offset calibration, no virtual-gear or steering support.
 
 ## Layout
@@ -495,8 +585,11 @@ src/
                builder, sync planning, catalog URL, the client that fetches it
   library/     Library entries from every source, search and filters, the
                IndexedDB store and My library
+  ride-log/    the ride log's entry for a finished ride
+  backup/      recovery key, encryption, the profile, the vault client
 public/       copied verbatim into the build: strava-callback.html
 relay/        Strava token relay — a Cloudflare Worker, deployed on its own
+vault/        encrypted backup store — a Cloudflare Worker over a private R2 bucket
 scripts/       test runner; catalog build/sync (catalog.mjs, catalog/) and R2 CORS rules
 tests/         node-run suites (FIT round-trip, parsers, full app boot in jsdom)
 samples/       a workout and a route to try the loaders on
@@ -573,6 +666,61 @@ Strava's own `400 … AuthorizationCode invalid`:
 curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev \
      -H "Origin: http://127.0.0.1:5173" -H "content-type: application/json" \
      -d '{"code":"nope"}'
+```
+
+## Backup vault
+
+`vault/src/index.ts` is a second Cloudflare Worker, in front of a **private**
+R2 bucket, `cycle-indoors-vault`. It holds one encrypted backup per recovery
+key and cannot read any of them. It is a separate bucket from the public
+catalog bucket, with no r2.dev access, and a separate Worker from the Strava
+relay, which stays stateless.
+
+```
+recovery key ──HKDF "auth/v1"──▶ token ── Authorization: Bearer ──▶ vault ── SHA-256(token) ──▶ R2 backups/<hex>
+             └─HKDF "enc/v1"───▶ AES-GCM key (never leaves the page): gzip(JSON profile) → ciphertext ─┘
+```
+
+- **No accounts.** The object's name is the SHA-256 of the token, so there
+  is nothing to look up. A wrong token simply addresses a different, empty
+  slot, and the bucket's listing yields no tokens.
+- **`GET /v1/backup`** returns the backup or 404. **`PUT`** replaces it with
+  no preconditions, so the last backup wins. **`DELETE`** removes it.
+- **Limits:**
+  - **Size:** 256 KiB per backup, checked on `Content-Length` and on the bytes
+    actually read. That is years of a profile, and useless for hosting files.
+  - **Rate:** 10 writes and 60 reads per minute per client IP, using Workers'
+    rate-limit binding.
+- **Origin allow-list** (`APP_ORIGINS` in `vault/wrangler.toml`), as in the
+  relay. The token is the access control.
+- **Nothing is logged.** Bodies and tokens never are.
+
+The app's side is `src/backup/`. Its `config.ts` holds the vault URL. While
+that is empty, the Backup panel says backup is unavailable and makes no
+request.
+
+### Deploying it
+
+```sh
+cd vault
+npm install                                    # wrangler, kept out of the app's dependencies
+npx wrangler login
+npx wrangler r2 bucket create cycle-indoors-vault   # leave public (r2.dev) access off
+npm run deploy
+```
+
+Then put the deployed URL into `DEFAULT_VAULT_URL` in `src/backup/config.ts`.
+`npm run dev` serves it on `:8787` with a local R2 under `vault/.wrangler`, and
+`VITE_VAULT_URL=http://127.0.0.1:8787 npm run dev` points the app at it.
+
+**Rolling back** means setting `DEFAULT_VAULT_URL` back to `''`. Stored
+backups stay in the bucket until they are deleted.
+
+To check a deploy, a made-up token must come back as `404 no backup`:
+
+```sh
+curl https://<vault-url>/v1/backup -H "Origin: http://127.0.0.1:5173" \
+     -H "Authorization: Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 ```
 
 ## Content catalog
@@ -897,7 +1045,10 @@ the bucket does not exist yet, or Wrangler's login has no R2 access
   callback channel, auto-upload on finish with no click and no pop-up, no
   second upload on reopening, the button with auto-upload off, a duplicate, a
   failure that can be retried, Upload while disconnected connecting first,
-  and an unticked permission.
+  and an unticked permission. The ride log is written when the summary
+  opens, once however often it is shown, linked to the activity after an
+  upload or a duplicate, and storage that is refused never blocks the
+  summary.
 - **catalog-index** — the index check: a newer major version is refused as
   "needs a newer version of the app", minor versions pass, and damaged
   indexes (no version, a route without a file, an id of the wrong kind) are
@@ -977,11 +1128,71 @@ the bucket does not exist yet, or Wrangler's login has no R2 access
 - **library-db** — the IndexedDB store on `fake-indexeddb`: a file added,
   the same bytes again only touching it, most-recent-first order, bytes and
   summaries intact across a new connection, touch and remove, one database
-  at version 2 with `done`, `files` and `plan` stores, and an open that errors or
+  at version 3 with `done`, `files`, `plan`, `refs` and `rides` stores, and an open that errors or
   throws (a private window) or no IndexedDB at all giving a harmless
   unavailable store. It also covers done marks with their time, a My library
   file's mark removed with it, following and replacing a plan across a new
-  connection, and a version 1 database upgraded with its files kept.
+  connection, and version 1 and 2 databases upgraded with their data kept.
+  The ride log is newest first, logging a ride again replaces it but keeps
+  its Strava link, and an unknown ride is never linked. A reference becomes
+  a file when the same bytes are loaded, and removing it takes its mark. A
+  restore replaces marks, plan, rides and My library exactly, deleting
+  local-only files and keeping referenced ones with their bytes, and a
+  restore that throws partway leaves every store as it was.
+- **ride-log** — the ride log's entry for a finished ride: the numbers, the
+  workout's and route's entry keys and titles, title only for a file not in
+  the Library, nothing for a ride under a minute, and a three-hour GPS ride
+  in under 1 KB with no samples or positions, and the file hash kept when
+  there is one.
+- **my-rides** — the My rides section in the booted app: newest first,
+  named by workout, route or free ride, the numbers and a Strava link,
+  Remove asking first and keeping done marks.
+- **ride-replay** — finding a logged ride's workout or route: by key, by
+  the file's hash after a rename or as a My library copy, a rideable copy
+  over an absent one, missing, and pending while the catalog loads; and
+  when Ride same session is ready.
+- **ride-same-session** — My rides in the booted app over a stand-in
+  catalog:
+  - no files fetched for the list;
+  - a clicked ride previewing its workout and route with profiles;
+  - Ride same session loading both as the same Library entries;
+  - a renamed catalog file found by its hash;
+  - a gone route saying No route found, with the button disabled;
+  - a free ride with no button;
+  - a workout-only ride unloading the previous route;
+  - the button disabled during a ride.
+- **absent-entries** — My library entries not on this device after a
+  restore: greyed with their done mark and no Ride; a different file with
+  the same name added beside them; the same bytes turning one into a normal
+  entry; Remove taking the reference and its mark.
+- **backup-key** — the recovery key: format, round trip in any case and
+  spacing, every single-symbol typo and every swap of neighbours refused,
+  and the token and non-exportable AES-GCM key derived from it.
+- **backup-seal** — encryption: a round trip, a fresh IV per seal, a few KB
+  for 500 marks, no plaintext in the ciphertext, and any flipped byte, the
+  wrong key, an unknown version or truncation failing as damaged.
+- **backup-profile** — every setting classed as personal or device-only (a
+  new one fails until it is), a profile holding references and never bytes,
+  tokens or the key, reading back loose or foreign data safely, settings
+  from an older backup getting defaults, and applying one replacing the
+  database while device settings stay.
+- **backup-vault-client** — the vault client against a stand-in fetch: one
+  endpoint, a bearer token and nothing else in the request, no backup as
+  undefined, and every failure mapped to a reason a rider can read.
+- **vault-worker** — the vault Worker against an in-memory bucket and fake
+  rate limiters: origins, tokens and paths refused, one backup per token
+  stored under its hash, the last put winning, 256 KiB accepted and one byte
+  more refused even with a lying `Content-Length`, per-IP write limits,
+  delete, and storage trouble reaching the app with CORS headers.
+- **backup** — backup and restore end to end through the real Worker:
+  confirming a new key, Reset to defaults keeping it, restore in a second
+  browser replacing its marks, rides, plan and files while its device
+  settings and Strava connection stay, the last backup winning, no backup,
+  a tampered backup changing nothing, delete and forget.
+- **backup-panel** — the Backup panel in the booted app: create, a wrong
+  confirmation uploading nothing, the restore warning with the backup's
+  date and contents, Cancel, Replace and the Strava notice, delete, forget,
+  entering a key, and no service configured.
 - **library-plans** — plan progress: none done, the next after two, skipping
   ahead without moving Up next past an undone workout, complete, a mark for a
   workout no longer in the plan, and an empty plan never complete.
@@ -1012,12 +1223,14 @@ the bucket does not exist yet, or Wrangler's login has no R2 access
   - kept entries listed and filterable as My library, and loaded at a
     changed FTP;
   - Remove asking first, Cancel keeping the entry, and Remove deleting it
-    while the ride keeps its course.
+    while the ride keeps its course;
+  - a dropped route, once kept, known as its My library entry for the ride
+    log.
 - **personal-unavailable** — the same app with storage refused: the file
   still loads, the rider is told it was not kept, and the Library says My
   library is unavailable while still listing the built-in workouts. Mark as
   done is disabled with the reason, and the summary offers no mark for the
-  unkept file.
+  unkept file, and My rides says the ride log is unavailable.
 - **app-boot** — boots the real UI in jsdom, connects the simulated devices,
   rides a workout, checks the dashboard/graph/interval bar update, exercises
   bias, mode switching and forward-only seeking (the Jump group holds only
