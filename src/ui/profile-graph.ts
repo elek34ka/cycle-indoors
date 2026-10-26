@@ -64,7 +64,7 @@ export function blockLabelY(
 }
 
 /** The hover readout: time, the target at exactly that moment (and the range on
- *  a ramp), then what was actually ridden there. */
+ *  a ramp), the block's whole duration, then what was actually ridden there. */
 export function hoverLines(
   seg: Segment | undefined,
   t: number,
@@ -80,6 +80,7 @@ export function hoverLines(
       const range = wattsText(seg, ftp);
       if (range?.includes('–')) lines.push(`range ${range}`);
     }
+    lines.push(`duration ${hhmmss(seg.duration)}`);
   }
   if (sample) lines.push(`actual ${sample.power} W${sample.heartRate ? ` · ${sample.heartRate} bpm` : ''}`);
   return lines;

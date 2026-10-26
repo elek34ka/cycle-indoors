@@ -172,4 +172,24 @@ suite('the hover readout shows the target under the cursor', () => {
   check('a free block says so', hoverLines(block(0, 60), 30, undefined, 300).includes('free ride'));
 });
 
+suite('the hover readout shows the block duration', () => {
+  const five = hoverLines(block(0, 300, 0.75), 120, undefined, 300);
+  check('two minutes into a 5-minute block it is the whole 5:00', five.includes('duration 5:00'), JSON.stringify(five));
+  const long = hoverLines(block(0, 4500, 0.6), 600, undefined, 300);
+  check('an hour or more is written h:mm:ss', long.includes('duration 1:15:00'), JSON.stringify(long));
+  const ramp = hoverLines(block(0, 600, 0.6, 0.8), 150, undefined, 300);
+  check('a ramp shows its own length beside target and range',
+    ramp.includes('duration 10:00') && ramp.includes('target 195 W') && ramp.includes('range 180–240 W'),
+    JSON.stringify(ramp));
+  const free = hoverLines(block(0, 600), 30, undefined, 300);
+  check('a free block shows its duration too', free.includes('free ride') && free.includes('duration 10:00'),
+    JSON.stringify(free));
+  const none = hoverLines(undefined, 700, { power: 200 }, 300);
+  check('no block, no duration', !none.some((l) => l.startsWith('duration')), JSON.stringify(none));
+  const all = hoverLines(block(0, 600, 0.6, 0.8), 150, { power: 200 }, 300);
+  check('lines run time, target, range, duration, actual',
+    JSON.stringify(all) === JSON.stringify(['2:30', 'target 195 W', 'range 180–240 W', 'duration 10:00', 'actual 200 W']),
+    JSON.stringify(all));
+});
+
 report();

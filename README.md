@@ -70,7 +70,7 @@ tablet on the same network you would need to serve the app over https.
   and from the FTP in Settings otherwise, so changing FTP relabels them at once.
   On the profile itself each block carries its watts (`180–240 W` on a ramp)
   wherever it is wide enough to hold them, and hovering reads out the target at
-  that exact second.
+  that exact second and the block's whole duration.
 - **Route as a course** — a loaded `.gpx`/`.fit` route gets its elevation
   smoothed over a 30 m window, then gradient and cumulative ascent precomputed.
   The elevation profile always sits directly under the power graph, tinted by
