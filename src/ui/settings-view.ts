@@ -36,14 +36,14 @@ const FIELDS: FieldSpec[] = [
   { key: 'riderWeight', label: 'Rider weight', min: 30, max: 160, step: 0.5, suffix: 'kg' },
   { key: 'bikeWeight', label: 'Bike weight', min: 3, max: 25, step: 0.1, suffix: 'kg' },
   { key: 'smoothPowerSeconds', label: 'Power smoothing', min: 0, max: 30, suffix: 'seconds shown on the dashboard' },
-  { key: 'wheelCircumference', label: 'Wheel circumference', min: 1000, max: 2500, suffix: 'mm — for wheel-based speed sensors (phase 2)' },
+  { key: 'wheelCircumference', label: 'Wheel circumference', min: 1000, max: 2500, suffix: 'mm — for wheel-based speed sensors' },
 ];
 
 export function buildSettingsView(): void {
   const host = qs('#settings-form');
   host.append(
     el('h2', { text: 'Rider profile' }),
-    el('p', { class: 'hint', text: 'Stored in this browser only. A real account and sync arrive with the backend.' }),
+    el('p', { class: 'hint', text: 'Stored in this browser only.' }),
   );
 
   const grid = el('div', { class: 'field-grid' });
