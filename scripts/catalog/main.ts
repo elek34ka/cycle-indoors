@@ -90,7 +90,7 @@ function reason(stderr: string, stdout: Buffer): string {
     .find((l) => l && !l.startsWith('🪵') && !l.startsWith('⛅')) ?? 'wrangler failed';
   if (/\b403\b|Forbidden/.test(text)) {
     return `${line}\n  Either the bucket "${BUCKET}" does not exist yet, or Wrangler's login has no R2 access.`
-      + '\n  Check with: npx wrangler r2 bucket list   (README: Publishing the catalog)';
+      + '\n  Check with: npx wrangler r2 bucket list   (docs/catalog.md: Publishing the catalog)';
   }
   if (/not logged in|wrangler login/i.test(text)) return `${line}\n  Run: npx wrangler login`;
   return line;

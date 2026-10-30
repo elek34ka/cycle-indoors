@@ -1,7 +1,7 @@
 /**
  * Where the published catalog lives. Public, so it is fine in source.
  *
- * The public r2.dev URL of the `cycle-indoors-catalog` bucket (README:
+ * The public r2.dev URL of the `cycle-indoors-catalog` bucket (docs/catalog.md:
  * Publishing the catalog). An empty string means no catalog is set up.
  * `VITE_CATALOG_URL` overrides it, which is how `npm run dev:catalog` points
  * the app at the local build in `.catalog/`.
