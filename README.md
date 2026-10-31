@@ -12,7 +12,7 @@ Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # ~2100 checks, no browser needed
+npm test           # ~2300 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 
@@ -78,12 +78,19 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
 
 ### After the ride
 
-- **Summary**: power, NP, IF, TSS, heart rate, climb, time in zones and how
-  closely you held the target.
+- **Summary**: power, NP, IF, TSS, heart rate, climb and how closely you held
+  the target. The whole ride is drawn on the workout graph, with your power and
+  heart rate over the blocks, and a route ride gets its elevation profile
+  underneath. Separate charts show time in power zones and heart-rate zones
+  (from max HR in Settings).
+- **Images**: Save graph image and Save stats image write PNGs of the graph
+  and of every number, for sharing. Strava does not accept images from apps,
+  so to put them on the activity you add them on Strava yourself.
 - **`.fit` export.** A route ride carries its GPS track, so Strava draws the
   map.
 - **Strava upload**, by button or automatically on finish, once connected in
-  Settings.
+  Settings. The activity's description names the route and the workout, then
+  lists the summary's numbers and time in zones.
 - **My rides**: a log of every finished ride's numbers. **Ride same session**
   loads the same workout and route again.
 

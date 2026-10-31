@@ -1,6 +1,6 @@
-import { dec, fileStamp, hhmmss, int, km, stamp } from '../core/format';
+import { fileStamp, hhmmss, km, stamp } from '../core/format';
 import { settings } from '../core/settings';
-import { buildActivityFit, downloadBytes } from '../activity/fit-export';
+import { buildActivityFit, downloadBlob, downloadBytes } from '../activity/fit-export';
 import { computeMetrics } from '../session/metrics';
 import { session, type SessionSnapshot } from '../session/session';
 import { strava, StravaNotConnected, type UploadResult } from '../activity/strava';
@@ -11,6 +11,13 @@ import { entryFor, routeEntryFor, type LoadedEntry } from '../library/loaded';
 import type { PersonalLibrary } from '../library/personal';
 import { courseStore } from '../activity/course-store';
 import { rideLogEntry } from '../ride-log/entry';
+import { stravaDescription } from '../activity/strava-description';
+import { subText, summaryValues } from './summary-values';
+import { ProfileGraph } from './profile-graph';
+import { ElevationGraph } from './elevation-graph';
+import type { Course } from '../activity/course';
+import type { RideMetrics, ZoneTime } from '../session/metrics';
+import { renderGraphImage, renderStatsImage, type ImageHeader } from './summary-image';
 
 /** Strava uploads by ride start time, so reopening a summary neither repeats
  *  an upload nor loses track of one still in flight. */
@@ -24,6 +31,124 @@ function cell(label: string, value: string, note?: string): HTMLElement {
     el('span', { text: label }),
     el('strong', { text: value }),
     note ? el('em', { text: note }) : null,
+  ]);
+}
+
+/** The open summary's graphs, disposed before the next summary replaces them. */
+let openGraphs: { dispose(): void }[] = [];
+
+/** The line above a finished route ride's profile: where, how far, how much climbing. */
+export function profileHeader(routeName: string, distance: number, ascent: number): string {
+  return `${routeName} · ${km(distance)} km · ↑ ${Math.round(ascent)} m`;
+}
+
+/** The whole ride on the workout graph, and the route's profile under it when it has one. */
+function rideGraphs(snapshot: SessionSnapshot, course: Course | undefined, distance: number, ascent: number): HTMLElement {
+  const lastT = snapshot.samples.at(-1)?.t ?? 0;
+  const finished = { ...snapshot, elapsed: Math.max(snapshot.elapsed || 0, lastT) };
+
+  const graphCanvas = el('canvas') as HTMLCanvasElement;
+  const graphHost = el('div', { class: 'summary-graph' }, [graphCanvas]);
+  const host = el('div', { class: 'summary-graphs' }, [graphHost]);
+  if (course?.hasElevation) {
+    const profileCanvas = el('canvas') as HTMLCanvasElement;
+    host.append(el('div', { class: 'summary-elevation' }, [profileCanvas]));
+  }
+  // The graphs size themselves from their hosts, so build them once the hosts exist.
+  const graph = new ProfileGraph(graphCanvas, { mode: 'whole' });
+  graph.setWorkout(snapshot.workout);
+  graph.render(finished);
+  openGraphs.push(graph);
+  const profileCanvas = host.querySelector<HTMLCanvasElement>('.summary-elevation canvas');
+  if (course && profileCanvas) {
+    const profile = new ElevationGraph(profileCanvas);
+    profile.setCourse(course);
+    profile.setFinished(distance, profileHeader(course.name, distance, ascent));
+    openGraphs.push(profile);
+  }
+  return host;
+}
+
+/** Time in each zone as bars, under a title; `empty` replaces the bars when there is nothing to show. */
+function zoneChart(title: string, zones: readonly ZoneTime[], empty?: string): HTMLElement {
+  const longest = Math.max(1, ...zones.map((z) => z.seconds));
+  return el('section', { class: 'zone-chart' }, [
+    el('h3', { text: title }),
+    empty
+      ? el('p', { class: 'empty', text: empty })
+      : el('div', { class: 'zone-bars' }, zones.map((z) => el('div', { class: 'zone-row' }, [
+        el('div', { text: `Z${z.zone} ${z.label}` }),
+        el('div', { class: 'track' }, [(() => {
+          const fill = el('div', { class: 'fill' });
+          fill.style.width = `${(z.seconds / longest) * 100}%`;
+          fill.style.background = z.color;
+          return fill;
+        })()]),
+        el('div', { class: 'time', text: hhmmss(z.seconds) }),
+      ]))),
+  ]);
+}
+
+export const NO_HEART_RATE = 'No heart rate recorded';
+
+export const IMAGES_NOTE = 'Add these to the activity on Strava by hand: Strava does not accept images from apps.';
+
+/** Save graph image and Save stats image, each a PNG named after the ride like its `.fit`. */
+function imageRow(
+  baseName: string,
+  header: ImageHeader,
+  snapshot: SessionSnapshot,
+  metrics: RideMetrics,
+  ftp: number,
+  course: Course | undefined,
+): HTMLElement {
+  const lastT = snapshot.samples.at(-1)?.t ?? 0;
+  const save = (text: string, suffix: string, render: () => Promise<Blob | null>) => {
+    const button = el('button', {
+      class: 'btn',
+      text,
+      on: {
+        click: async () => {
+          button.disabled = true;
+          try {
+            const blob = await render().catch(() => null);
+            if (!blob) {
+              toast('Could not save the image: this browser did not produce one.', 'error');
+              return;
+            }
+            downloadBlob(blob, `${baseName}-${suffix}.png`);
+          } finally {
+            button.disabled = false;
+          }
+        },
+      },
+    }) as HTMLButtonElement;
+    return button;
+  };
+  const values = summaryValues(metrics, snapshot.laps.length);
+  return el('div', { class: 'summary-images' }, [
+    save('Save graph image', 'graph', () => renderGraphImage({
+      header,
+      graph: {
+        workout: snapshot.workout,
+        samples: snapshot.samples,
+        elapsed: Math.max(snapshot.elapsed || 0, lastT),
+        ftp,
+        hrMax: settings.current.hrMax,
+        smoothWindow: settings.current.smoothPowerSeconds,
+      },
+      ...(course?.hasElevation ? {
+        profile: { course, ridden: metrics.distance, header: profileHeader(course.name, metrics.distance, metrics.ascent) },
+      } : {}),
+    })),
+    save('Save stats image', 'stats', () => renderStatsImage({
+      header,
+      values,
+      zones: metrics.zones,
+      hrZones: metrics.hrZones,
+      ...(metrics.avgHr === undefined ? { hrEmpty: NO_HEART_RATE } : {}),
+    })),
+    el('span', { class: 'summary-images-note', text: IMAGES_NOTE }),
   ]);
 }
 
@@ -61,16 +186,19 @@ function markDoneRow(entry: LoadedEntry, personal: PersonalLibrary): HTMLElement
 
 export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrary): void {
   const overlay = qs('#summary-overlay');
+  for (const graph of openGraphs) graph.dispose();
+  openGraphs = [];
   clear(overlay);
 
   const ftp = snapshot.workout?.ftpOverride ?? settings.current.ftp;
   const samples = [...snapshot.samples];
-  const metrics = computeMetrics(samples, ftp);
+  const metrics = computeMetrics(samples, ftp, settings.current.hrMax);
   const title = snapshot.workout?.name ?? 'Free ride';
   const startedAt = session.startedAt ?? new Date();
+  // What was ridden is what was loaded when the summary opened, whatever is loaded later.
+  const course = courseStore.current;
 
   if (personal) {
-    const course = courseStore.current;
     const logged = rideLogEntry({
       startedAt,
       metrics,
@@ -83,48 +211,37 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
 
   const card = el('div', { class: 'summary-card' });
 
+  const subtitle = `${stamp(startedAt)} · ${metrics.duration ? hhmmss(metrics.duration) : 'nothing recorded'} · FTP ${ftp} W`;
   card.append(el('header', {}, [
     el('h2', { text: title }),
-    el('p', { text: `${stamp(startedAt)} · ${metrics.duration ? hhmmss(metrics.duration) : 'nothing recorded'} · FTP ${ftp} W` }),
+    el('p', { text: subtitle }),
   ]));
+  const baseName = `cycle-indoors-${fileStamp(startedAt)}`;
 
   if (samples.length === 0) {
     card.append(el('p', { class: 'empty', text: 'No data was recorded for this ride.' }));
   } else {
-    card.append(el('div', { class: 'summary-grid' }, [
-      cell('Duration', hhmmss(metrics.duration)),
-      cell('Distance', `${km(metrics.distance)}`, 'km'),
-      cell('Avg power', int(metrics.avgPower), 'W'),
-      cell('Normalised', int(metrics.normalisedPower), 'W'),
-      cell('Max power', int(metrics.maxPower), 'W'),
-      cell('Intensity', dec(metrics.intensityFactor, 2), 'IF'),
-      cell('TSS', int(metrics.tss)),
-      cell('Work', int(metrics.work), 'kJ'),
-      cell('Avg HR', int(metrics.avgHr), metrics.maxHr ? `max ${Math.round(metrics.maxHr)}` : undefined),
-      cell('Avg cadence', int(metrics.avgCadence), 'rpm'),
-      cell('Avg speed', dec(metrics.avgSpeed, 1), 'km/h'),
-      metrics.hasPosition
-        ? cell('Climbed', int(metrics.ascent), `${Math.round(metrics.descent)} m down`)
-        : null,
-      metrics.compliance === undefined
-        ? cell('Laps', String(Math.max(1, snapshot.laps.length)))
-        : cell('On target', `${Math.round(metrics.compliance)}%`, 'vs. workout'),
-    ].filter((node): node is HTMLElement => node !== null)));
-
-    const longest = Math.max(1, ...metrics.zones.map((z) => z.seconds));
-    card.append(el('div', { class: 'zone-bars' }, metrics.zones.map((z) => el('div', { class: 'zone-row' }, [
-      el('div', { text: `Z${z.zone} ${z.label}` }),
-      el('div', { class: 'track' }, [(() => {
-        const fill = el('div', { class: 'fill' });
-        fill.style.width = `${(z.seconds / longest) * 100}%`;
-        fill.style.background = z.color;
-        return fill;
-      })()]),
-      el('div', { class: 'time', text: hhmmss(z.seconds) }),
-    ]))));
+    card.append(rideGraphs(snapshot, course, metrics.distance, metrics.ascent));
+    card.append(el('div', { class: 'summary-grid' },
+      summaryValues(metrics, snapshot.laps.length).map((v) => cell(v.label, v.value, subText(v)))));
+    card.append(el('div', { class: 'zone-charts' }, [
+      zoneChart('Power zones', metrics.zones),
+      zoneChart('Heart-rate zones', metrics.hrZones, metrics.avgHr === undefined ? NO_HEART_RATE : undefined),
+    ]));
+    const header = { title, subtitle, ...(course ? { route: `Route: ${course.name}` } : {}) };
+    card.append(imageRow(baseName, header, snapshot, metrics, ftp, course));
   }
 
-  const fileName = `cycle-indoors-${fileStamp(startedAt)}.fit`;
+  const fileName = `${baseName}.fit`;
+  // Built now, so an upload later still describes what was ridden, whatever is loaded by then.
+  const description = stravaDescription({
+    ...(course ? { route: course.name } : {}),
+    ...(snapshot.workout ? { workout: snapshot.workout.name } : {}),
+    values: summaryValues(metrics, snapshot.laps.length),
+    ...(metrics.maxHr !== undefined ? { maxHr: Math.round(metrics.maxHr) } : {}),
+    zones: metrics.zones,
+    hrZones: metrics.hrZones,
+  });
   const buildFit = () => buildActivityFit({ startedAt, samples, laps: snapshot.laps, metrics, name: title });
 
   const download = el('button', {
@@ -173,13 +290,16 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
         },
       },
     }),
-    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName }), personal) : null,
+    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName, description }), personal) : null,
     download,
   ]));
 
   overlay.append(card);
   overlay.classList.remove('hidden');
 }
+
+/** What an upload sends: the `.fit`, its name and file name, and the description. */
+interface RideUpload { bytes: Uint8Array; name: string; fileName: string; description: string }
 
 /**
  * Upload to Strava, or a link to the activity once it is there. With
@@ -188,7 +308,7 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
  */
 function stravaButton(
   startedAt: Date,
-  ride: () => { bytes: Uint8Array; name: string; fileName: string },
+  ride: () => RideUpload,
   personal?: PersonalLibrary,
 ): HTMLElement {
   const key = startedAt.getTime();
@@ -231,7 +351,7 @@ function stravaButton(
 
 async function uploadRide(
   key: number,
-  ride: () => { bytes: Uint8Array; name: string; fileName: string },
+  ride: () => RideUpload,
   fromClick: boolean,
   personal?: PersonalLibrary,
 ): Promise<void> {
@@ -246,8 +366,8 @@ async function uploadRide(
 
   set({ busy: 'Uploading…' });
   try {
-    const { bytes, name, fileName } = ride();
-    const result = await strava.upload(bytes, { name, externalId: fileName }, (busy) => set({ busy }));
+    const { bytes, name, fileName, description } = ride();
+    const result = await strava.upload(bytes, { name, description, externalId: fileName }, (busy) => set({ busy }));
     set({ result });
     // The ride log links to the activity, whether new or one Strava already had.
     if (result.kind !== 'processing' && result.activityId !== undefined) void personal?.setRideStrava(key, result.activityId);

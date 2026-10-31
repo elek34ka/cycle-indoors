@@ -25,6 +25,12 @@ export function setupDom(): JSDOM {
     return ctx;
   };
   window.HTMLCanvasElement.prototype.getContext = fakeContext as never;
+  // jsdom cannot encode a canvas. Hand back the 8-byte PNG signature, later, as a
+  // browser does; a test can replace this to make the browser refuse.
+  window.HTMLCanvasElement.prototype.toBlob = function toBlob(callback: BlobCallback, type = 'image/png') {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    setTimeout(() => callback(new window.Blob([bytes], { type })), 0);
+  };
 
   // jsdom reports every element as 0x0, which makes canvas sizing and Leaflet's
   // zoom maths degenerate. Give everything a plausible box instead.

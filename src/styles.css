@@ -608,11 +608,16 @@ input[type="number"], input[type="text"] {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 24px;
-  width: min(760px, 100%);
+  width: min(960px, 100%);
   display: grid;
   gap: 18px;
   box-shadow: 0 24px 60px rgba(0,0,0,0.5);
 }
+/* The summary can be taller than the window. A centred grid item would then
+   overflow above the top, out of scroll reach; auto margins centre it only
+   while it fits. */
+#summary-overlay { place-items: start center; }
+#summary-overlay .summary-card { margin-block: auto; }
 .summary-card header h2 { margin: 0; font-size: 22px; }
 .summary-card header p { margin: 4px 0 0; color: var(--text-faint); font-size: 14px; }
 .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
@@ -626,11 +631,31 @@ input[type="number"], input[type="text"] {
 .summary-grid .cell strong { font-family: var(--mono); font-size: 24px; font-weight: 550; font-variant-numeric: tabular-nums; }
 .summary-grid .cell em { font-style: normal; font-size: 13px; color: var(--text-faint); }
 
+/* The graphs size their canvases from these boxes, so each needs a definite height. */
+.summary-graphs { display: grid; gap: 6px; }
+.summary-graph, .summary-elevation {
+  position: relative;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.summary-graph { height: 240px; }
+.summary-elevation { height: 150px; }
+.summary-graph canvas, .summary-elevation canvas { display: block; }
+
+.zone-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.zone-chart h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint); font-weight: 600; }
+.zone-chart .empty { margin: 0; color: var(--text-faint); font-size: 14px; }
+
 .zone-bars { display: grid; gap: 5px; }
 .zone-bars .zone-row { display: grid; grid-template-columns: 110px 1fr 58px; align-items: center; gap: 10px; font-size: 14px; }
 .zone-bars .track { background: #121823; border-radius: 4px; height: 16px; overflow: hidden; }
 .zone-bars .fill { height: 100%; border-radius: 4px; min-width: 2px; }
 .zone-bars .time { font-family: var(--mono); font-size: 13px; color: var(--text-dim); text-align: right; }
+
+.summary-images { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.summary-images-note { color: var(--text-faint); font-size: 14px; }
 
 .summary-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 /* The Strava slot swaps a button for a link; neither may shift the row. */

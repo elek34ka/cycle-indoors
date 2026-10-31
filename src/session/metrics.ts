@@ -1,4 +1,4 @@
-import { POWER_ZONES, zoneForRatio } from '../core/zones';
+import { HR_ZONES, POWER_ZONES, zoneForHr, zoneForRatio } from '../core/zones';
 
 export interface Sample {
   /** seconds of elapsed ride time */
@@ -46,6 +46,8 @@ export interface RideMetrics {
   startLat?: number;
   startLon?: number;
   zones: ZoneTime[];
+  /** time in each heart-rate zone, counting only seconds with a reading; all zero without a max HR */
+  hrZones: ZoneTime[];
   /** how closely the ride tracked the workout target, 0-100 (undefined for free rides) */
   compliance?: number;
 }
@@ -68,7 +70,7 @@ export function normalisedPower(powers: number[], window = 30): number {
   return ((quartics.reduce((s, v) => s + v, 0) / quartics.length)) ** 0.25;
 }
 
-export function computeMetrics(samples: Sample[], ftp: number): RideMetrics {
+export function computeMetrics(samples: Sample[], ftp: number, hrMax?: number): RideMetrics {
   const powers = samples.map((s) => s.power);
   const hrs = samples.map((s) => s.heartRate).filter((v): v is number => v !== undefined && v > 0);
   const cads = samples.map((s) => s.cadence).filter((v): v is number => v !== undefined);
@@ -84,6 +86,15 @@ export function computeMetrics(samples: Sample[], ftp: number): RideMetrics {
   for (const s of samples) {
     const z = zoneForRatio(ftp > 0 ? s.power / ftp : 0);
     seconds.set(z.id, (seconds.get(z.id) ?? 0) + 1);
+  }
+
+  const hrSeconds = new Map<number, number>();
+  if (hrMax && hrMax > 0) {
+    for (const s of samples) {
+      if (!(s.heartRate && s.heartRate > 0)) continue;
+      const z = zoneForHr(s.heartRate, hrMax);
+      hrSeconds.set(z.id, (hrSeconds.get(z.id) ?? 0) + 1);
+    }
   }
 
   let ascent = 0;
@@ -129,6 +140,9 @@ export function computeMetrics(samples: Sample[], ftp: number): RideMetrics {
     startLon: firstFix?.lon,
     zones: POWER_ZONES.map((z) => ({
       zone: z.id, label: z.label, color: z.color, seconds: seconds.get(z.id) ?? 0,
+    })),
+    hrZones: HR_ZONES.map((z) => ({
+      zone: z.id, label: z.label, color: z.color, seconds: hrSeconds.get(z.id) ?? 0,
     })),
     compliance,
   };
