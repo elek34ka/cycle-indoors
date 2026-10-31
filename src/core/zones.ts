@@ -20,17 +20,22 @@ export function zoneForPower(watts: number, ftp: number): Zone {
   return zoneForRatio(ftp > 0 ? watts / ftp : 0);
 }
 
-/** 5 heart-rate zones as fraction of max HR. */
-export const HR_ZONES = [
-  { id: 1, max: 0.60, color: '#7a8694' },
-  { id: 2, max: 0.70, color: '#3f8fd8' },
-  { id: 3, max: 0.80, color: '#3fc07a' },
-  { id: 4, max: 0.90, color: '#f08a35' },
-  { id: 5, max: Infinity, color: '#e4563c' },
+/** 5 heart-rate zones, expressed as upper bounds in fraction of max HR. */
+export const HR_ZONES: Zone[] = [
+  { id: 1, key: 'z1', label: 'Recovery',  max: 0.60, color: '#7a8694' },
+  { id: 2, key: 'z2', label: 'Endurance', max: 0.70, color: '#3f8fd8' },
+  { id: 3, key: 'z3', label: 'Tempo',     max: 0.80, color: '#3fc07a' },
+  { id: 4, key: 'z4', label: 'Threshold', max: 0.90, color: '#f08a35' },
+  { id: 5, key: 'z5', label: 'Maximum',   max: Infinity, color: '#e4563c' },
 ];
 
-export function hrZoneColor(bpm: number, hrMax: number): string {
+/** The zone a heart rate falls in; a bound belongs to the zone below it, as for power. */
+export function zoneForHr(bpm: number, hrMax: number): Zone {
   const r = hrMax > 0 ? bpm / hrMax : 0;
-  for (const z of HR_ZONES) if (r <= z.max) return z.color;
-  return '#e4563c';
+  for (const z of HR_ZONES) if (r <= z.max) return z;
+  return HR_ZONES[HR_ZONES.length - 1];
+}
+
+export function hrZoneColor(bpm: number, hrMax: number): string {
+  return zoneForHr(bpm, hrMax).color;
 }

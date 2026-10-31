@@ -1,7 +1,7 @@
 import { setupDom } from './dom-setup';
 setupDom();
 
-const { smoothSamples, labelFits, blockLabelY, hoverLines, ProfileGraph } = await import('../src/ui/profile-graph');
+const { smoothSamples, labelFits, blockLabelY, hoverLines, ProfileGraph, liveDomain, wholeRideDomain } = await import('../src/ui/profile-graph');
 const { buildActivityFit } = await import('../src/activity/fit-export');
 const { computeMetrics } = await import('../src/session/metrics');
 const { decodeFit } = await import('../src/fit/decoder');
@@ -190,6 +190,26 @@ suite('the hover readout shows the block duration', () => {
   check('lines run time, target, range, duration, actual',
     JSON.stringify(all) === JSON.stringify(['2:30', 'target 195 W', 'range 180–240 W', 'duration 10:00', 'actual 200 W']),
     JSON.stringify(all));
+});
+
+suite('the ride screen\'s axis is unchanged', () => {
+  const w45 = { duration: 2700 };
+  check('a workout spans itself', JSON.stringify(liveDomain(w45, 600)) === '{"from":0,"to":2700}');
+  check('riding past it grows the axis in five-minute steps',
+    JSON.stringify(liveDomain(w45, 2701)) === '{"from":0,"to":3000}');
+  check('a free ride shows its last ten minutes',
+    JSON.stringify(liveDomain(undefined, 2400)) === '{"from":1860,"to":2460}');
+  check('a short free ride starts at 0', JSON.stringify(liveDomain(undefined, 60)) === '{"from":0,"to":600}');
+});
+
+suite('the summary\'s axis is the whole ride', () => {
+  const span = (d: { from: number; to: number }) => `${d.from}–${d.to}`;
+  check('45-minute workout ridden for 45: 0–2700', span(wholeRideDomain({ duration: 2700 }, 2700)) === '0–2700');
+  const past = wholeRideDomain({ duration: 2700 }, 3120);
+  check('ridden for 52: covers 0–3120', past.from === 0 && past.to >= 3120, span(past));
+  check('free ride of 40 minutes: 0–2400, not the last ten', span(wholeRideDomain(undefined, 2400)) === '0–2400');
+  check('60-minute workout finished at 20: all 60 minutes', span(wholeRideDomain({ duration: 3600 }, 1200)) === '0–3600');
+  check('an empty ride still has an axis', span(wholeRideDomain(undefined, 0)) === '0–60');
 });
 
 report();

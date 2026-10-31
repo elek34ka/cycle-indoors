@@ -13,6 +13,9 @@ const { settings } = await import('../src/core/settings');
 const { session } = await import('../src/session/session');
 const { openLibraryStore, UNAVAILABLE_STORE } = await import('../src/library/db');
 const { PersonalLibrary } = await import('../src/library/personal');
+const { courseStore } = await import('../src/activity/course-store');
+const { parseGpx } = await import('../src/activity/gpx');
+const { readFileSync } = await import('node:fs');
 type SessionSnapshot = import('../src/session/session').SessionSnapshot;
 
 const doc = dom.window.document;
@@ -27,6 +30,8 @@ async function until(condition: () => boolean, ms = 2000): Promise<boolean> {
 
 /** Strava, the relay and the pop-up, faked at the browser's edges. */
 const requests: { url: string; method: string }[] = [];
+/** the form of every upload Strava received, in order */
+const uploadForms: FormData[] = [];
 let uploadReply: () => Response = () => Response.json({ id: 1, activity_id: 4242 });
 globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
   const url = String(input);
@@ -35,7 +40,10 @@ globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
     return Response.json({ access_token: 'acc', refresh_token: 'ref', expires_at: Date.now() / 1000 + 21600, scope: 'activity:write read' });
   }
   if (url === `${STRAVA.apiBase}/athlete`) return Response.json({ firstname: 'Ada', lastname: 'Rider' });
-  if (url === `${STRAVA.apiBase}/uploads`) return uploadReply();
+  if (url === `${STRAVA.apiBase}/uploads`) {
+    if (init.body instanceof FormData) uploadForms.push(init.body);
+    return uploadReply();
+  }
   if (url === STRAVA.deauthorizeUrl) return Response.json({});
   throw new TypeError(`unexpected request ${url}`);
 }) as typeof fetch;
@@ -107,6 +115,7 @@ suite('connecting from Settings', () => {
 const rideA = new Date('2026-10-25T07:00:00');
 showSummary(finishedRide(rideA), personal);
 const autoDone = await until(() => summaryStrava()?.tagName === 'A');
+const autoForm = uploadForms.at(-1);
 const link = summaryStrava() as HTMLAnchorElement | null;
 await until(() => false, 50);
 const rideALogged = await loggedRide(rideA);
@@ -119,6 +128,10 @@ suite('auto-upload on finish', () => {
   check('opens in a new tab', link?.getAttribute('target') === '_blank');
   check('the ride counts as saved, so New ride will not warn', session.exported);
   check('no pop-up was needed', popups.length === 1);
+  const description = String(autoForm?.get('description') ?? '');
+  check('the upload carries a description', description.length > 0);
+  check('a free ride without a route starts with its numbers', description.startsWith('Duration '), description);
+  check('and ends with the credit', description.endsWith('\n\nRidden on Cycle Indoors'), description);
 });
 
 suite('the ride log', () => {
@@ -213,5 +226,47 @@ suite('unticking upload permission on Strava', () => {
   check('and uploads nothing', uploadsPosted() === 4, String(uploadsPosted()));
   check('the button is still there to try again', summaryStrava()?.textContent === 'Upload to Strava');
 });
+
+// Connected again, by the button: the description describes what the summary opened on.
+const workoutRide = (start: Date): SessionSnapshot => ({
+  ...finishedRide(start),
+  workout: { name: 'Sweet Spot 3x15', duration: 120, segments: [], textEvents: [], source: 'zwo' },
+} as unknown as SessionSnapshot);
+const hilly = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'Hilly loop');
+settings.patch({ stravaAutoUpload: false });
+uploadReply = () => Response.json({ id: 5, activity_id: 55 });
+const routeName = courseStore.load(hilly)!.name;
+showSummary(workoutRide(new Date('2026-10-25T12:00:00')));
+courseStore.load({ ...hilly, name: 'Another route' });
+summaryStrava()!.click();
+await wait();
+approveInPopup();
+await until(() => summaryStrava()?.textContent === 'View on Strava');
+const clickedForm = uploadForms.at(-1);
+
+courseStore.unload();
+settings.patch({ stravaAutoUpload: true });
+uploadReply = () => Response.json({ id: 6, activity_id: 66 });
+showSummary(workoutRide(new Date('2026-10-25T13:00:00')));
+await until(() => summaryStrava()?.textContent === 'View on Strava');
+const autoWorkoutForm = uploadForms.at(-1);
+
+suite('the description Strava receives', () => {
+  const clicked = String(clickedForm?.get('description') ?? '');
+  check('names the route the summary opened on, though another was loaded before the click',
+    clicked.startsWith(`Route: ${routeName}\nWorkout: Sweet Spot 3x15\n\n`), clicked.split('\n').slice(0, 3).join(' | '));
+  check('not the route loaded afterwards', !clicked.includes('Another route'));
+  const auto = String(autoWorkoutForm?.get('description') ?? '');
+  check('auto-upload sends one too, starting with the workout', auto.startsWith('Workout: Sweet Spot 3x15\n'), auto);
+  check('the button and auto-upload write the same numbers for the same ride',
+    clicked.split('\n\n').slice(1).join() === auto.split('\n\n').slice(1).join());
+  const files = clickedForm?.getAll('file') ?? [];
+  check('exactly one file goes to Strava', files.length === 1, String(files.length));
+  check('and it is the .fit, not an image', (files[0] as File | undefined)?.name.endsWith('.fit') === true
+    && !(files[0] as File).type.startsWith('image/'));
+  check('no other part of the form is a file', [...(clickedForm?.entries() ?? [])]
+    .filter(([, value]) => typeof value !== 'string').length === 1);
+});
+settings.patch({ stravaAutoUpload: false });
 
 report();

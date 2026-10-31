@@ -128,7 +128,35 @@
   function below a ramp's top edge across the label's full width, and the
   rendered graph is checked to draw a 100–120 W and a steep 120–360 W ramp label
   on the block's colour rather than at the height of its high end, where it
-  used to be invisible.
+  used to be invisible. The ride screen's time axis (the workout, overrun in
+  five-minute steps, a free ride's last ten minutes) and the summary's
+  whole-ride axis are pure functions, checked for each case.
+- **hr-zones** — the five heart-rate zones: labels, the bound landing in the
+  zone below (111 of 185 is Z1, 112 is Z2), and the trace colour unchanged for
+  every bpm from 100 to 200. Time in zones counts only seconds with a
+  reading: 600 s at 140 and 300 s at 160 bpm give Z3 10:00 and Z4 5:00, and a
+  strap that drops out after 40 minutes adds up to 40:00.
+- **ride-summary** — the summary in jsdom. The grid is built from the one list
+  of summary values, so Climbed appears only with a route and On target only
+  with a workout. Checks that every ride has the whole-ride graph, that only a
+  route with elevation gets a profile (headed by name, distance and climb, for
+  the route loaded when the summary opened), and that an empty ride gets
+  neither. Reopening disposes the old graphs' observers. The power and heart-rate
+  zone charts are checked, including "No heart rate recorded". A hover at
+  12:30 reads out that block and second. Save graph image and Save stats image
+  download PNGs named after the `.fit`; a browser that returns no image gets a
+  toast and leaves Download .fit and Upload to Strava working.
+- **summary-image** — the two images' layouts: 1600 × 900, or 1600 × 1240 with
+  the profile under the graph, whatever the window's width. The stats card
+  holds every summary value with its unit or note, both zone charts, the
+  route and the credit, with no text under 18 px, and leaves out what the
+  ride does not have. Encoding gives a PNG, or `null` (never a throw) when
+  the browser refuses.
+- **strava-description** — the description an upload carries: route then
+  workout on their own lines (each only when there was one, and a free ride
+  is never called "Free ride"), the summary's own strings for every number,
+  no line for heart rate, climb or on-target when the ride has none, only
+  the zones with time in them, and the credit last after a blank line.
 - **workout-navigation** — the workout clock only moves forward: `+30s` and
   next block advance it, a backward seek is refused, `+30s` at 59:50 of an
   hour stops on 60:00, and once the workout has run out neither control moves
@@ -186,7 +214,9 @@
   and an unticked permission. The ride log is written when the summary
   opens, once however often it is shown, linked to the activity after an
   upload or a duplicate, and storage that is refused never blocks the
-  summary.
+  summary. Both upload paths send the same description, naming the route the
+  summary opened on even when another is loaded before the click. Exactly one
+  file goes to Strava, the `.fit`; the images never do.
 - **catalog-index** — the index check: a newer major version is refused as
   "needs a newer version of the app", minor versions pass, and damaged
   indexes (no version, a route without a file, an id of the wrong kind) are
