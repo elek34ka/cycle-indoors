@@ -1,6 +1,6 @@
 import { hhmmss, int, dec, mmss } from '../core/format';
 import { settings } from '../core/settings';
-import { hrZoneColor, zoneForPower } from '../core/zones';
+import { hrZoneColor, riderZones, zoneForPower } from '../core/zones';
 import { courseStore } from '../activity/course-store';
 import { gradientColor, type Course } from '../activity/course';
 import { mock } from '../devices/setup';
@@ -60,6 +60,10 @@ const orElse = (rows: SubPart[][], fallback: string): SideRow[] => (rows.length 
 /** The FTP a workout's percentages are taken against: its own, if the file set
  *  one, otherwise the rider's. */
 const effectiveFtp = (workout: Workout): number => workout.ftpOverride ?? settings.current.ftp;
+/** The FTP the ride is measured against right now, workout or not. */
+const rideFtp = (s: SessionSnapshot): number => (s.workout ? effectiveFtp(s.workout) : settings.current.ftp);
+/** The rider's zones, as Settings has them now, so an edit shows mid-ride. */
+const zones = () => riderZones(settings.current);
 
 const TILES: TileSpec[] = [
   {
@@ -68,7 +72,7 @@ const TILES: TileSpec[] = [
     unit: 'W',
     value: (s) => int(s.smoothedPower),
     side: (s) => orElse(averages(s.avgPower, s.lapAvgPower), `${settings.current.smoothPowerSeconds}s average`),
-    stripe: (s) => (s.smoothedPower === undefined ? undefined : zoneForPower(s.smoothedPower, settings.current.ftp).color),
+    stripe: (s) => (s.smoothedPower === undefined ? undefined : zoneForPower(s.smoothedPower, rideFtp(s), zones().power).color),
   },
   {
     key: 'target',
@@ -85,7 +89,7 @@ const TILES: TileSpec[] = [
       if (s.targetCadence) rows.push(figure(String(s.targetCadence), 'rpm'));
       return rows;
     },
-    stripe: (s) => (s.targetPower > 0 ? zoneForPower(s.targetPower, settings.current.ftp).color : undefined),
+    stripe: (s) => (s.targetPower > 0 ? zoneForPower(s.targetPower, rideFtp(s), zones().power).color : undefined),
   },
   {
     key: 'hr',
@@ -93,7 +97,7 @@ const TILES: TileSpec[] = [
     unit: 'bpm',
     value: (s) => int(s.smoothedHeartRate),
     side: (s) => orElse(averages(s.avgHeartRate, s.lapAvgHeartRate), 'no strap'),
-    stripe: (s) => (s.smoothedHeartRate ? hrZoneColor(s.smoothedHeartRate, settings.current.hrMax) : undefined),
+    stripe: (s) => (s.smoothedHeartRate ? hrZoneColor(s.smoothedHeartRate, settings.current.hrMax, zones().hr) : undefined),
   },
   {
     key: 'cadence',
@@ -109,6 +113,11 @@ const TILES: TileSpec[] = [
     hero: true,
   },
 ];
+
+/** The zone colour a tile's stripe shows for `s`, or undefined for none. */
+export function tileStripe(key: string, s: SessionSnapshot): string | undefined {
+  return TILES.find((t) => t.key === key)?.stripe?.(s);
+}
 
 function wattsInput(title: string): HTMLInputElement {
   return el('input', {
@@ -211,6 +220,7 @@ export class RideView {
     session.on('state', () => this.render(session.snapshot));
     settings.on('change', () => {
       this.renderSegmentLabels();
+      this.colourSegments();
       this.render(session.snapshot);
     });
     courseStore.on('course', (c) => this.onCourseChanged(c));
@@ -568,20 +578,32 @@ export class RideView {
     ];
     this.workoutMeta.append(...meta.filter((node): node is Node => node !== null));
 
-    const ftp = effectiveFtp(workout);
     workout.segments.forEach((seg) => {
-      const mid = seg.powerStart === undefined ? undefined : ((seg.powerStart + (seg.powerEnd ?? seg.powerStart)) / 2);
-      const color = mid === undefined ? '#7a8694' : zoneForPower(mid * ftp, ftp).color;
       const node = el('li', { dataset: { index: String(seg.index) } }, [
         el('div', { class: 'bar' }),
         el('div', { class: 'label' }),
         el('div', { class: 'dur', text: mmss(seg.duration) }),
       ]);
-      (node.firstElementChild as HTMLElement).style.background = color;
       this.segmentList.append(node);
       this.segmentNodes.push(node);
     });
+    this.colourSegments();
     this.renderSegmentLabels();
+  }
+
+  /** Colours each block's bar by the rider's power zones, in place. */
+  private colourSegments(): void {
+    const workout = this.workout;
+    if (!workout) return;
+    const ftp = effectiveFtp(workout);
+    const power = zones().power;
+    workout.segments.forEach((seg, i) => {
+      const bar = this.segmentNodes[i]?.firstElementChild as HTMLElement | null | undefined;
+      if (!bar) return;
+      const mid = seg.powerStart === undefined ? undefined : ((seg.powerStart + (seg.powerEnd ?? seg.powerStart)) / 2);
+      const color = mid === undefined ? '#7a8694' : zoneForPower(mid * ftp, ftp, power).color;
+      bar.style.background = color;
+    });
   }
 
   /** Writes each block's target in watts. Only when the FTP they are worked out

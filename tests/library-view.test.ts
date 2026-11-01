@@ -43,6 +43,8 @@ const step = (name: string, seconds: number) =>
 const build = await buildCatalog([
   { path: 'workouts/vo2/The_Famous_40_20_s.zwo', bytes: FORTY },
   { path: 'workouts/WO5_Russian_Steps.zwo', bytes: STEPS },
+  // one block at 77 % of FTP: Z3 by the standard zones, Z2 for a rider whose Z2 ends at 78 %
+  { path: 'workouts/Steady_77.zwo', bytes: enc('<workout_file><name>Steady 77</name><workout><SteadyState Duration="600" Power="0.77"/></workout></workout_file>') },
   { path: 'routes/georgia/sample-hilly-loop.gpx', bytes: new Uint8Array(readFileSync('samples/sample-hilly-loop.gpx')) },
   // A plan in the shape of the owner's folders: sub-folders, numbers in names.
   { path: 'plans/Base_Builder/Week_10/Taper.zwo', bytes: step('Taper', 1200) },
@@ -50,8 +52,8 @@ const build = await buildCatalog([
   { path: 'plans/Base_Builder/Week_2/2_1_Endurance.zwo', bytes: step('Long endurance', 3600) },
   { path: 'plans/Base_Builder/Intro.zwo', bytes: step('Intro ride', 1800) },
 ]);
-/** two standalone workouts plus the plan's four */
-const CATALOG_WORKOUTS = 6;
+/** three standalone workouts plus the plan's four */
+const CATALOG_WORKOUTS = 7;
 const BASE = 'https://pub-test.r2.dev';
 const objects = new Map<string, Uint8Array>([
   [`${BASE}/index.json`, enc(JSON.stringify(build.index))],
@@ -141,6 +143,27 @@ suite('selecting a workout shows its details', () => {
   check('the row is marked selected', row('catalog:workout:vo2/The_Famous_40_20_s').classList.contains('selected'));
 });
 
+// The Library describes the workout, not the rider: it keeps the standard zones.
+const { POWER_ZONES } = await import('../src/core/zones');
+const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+const zonesBefore = settings.current.powerZoneBounds;
+settings.patch({ powerZoneBounds: [0.55, 0.78, 0.90, 1.05, 1.20, 1.50] });
+await settle();
+row('catalog:workout:Steady_77').click();
+const steadyProfile = row('catalog:workout:Steady_77').querySelector('svg.lib-profile polygon')?.getAttribute('fill');
+const steadyLarge = doc.querySelector('#library-root .lib-detail svg.lib-profile-large polygon')?.getAttribute('fill');
+const steadyBar = doc.querySelector<HTMLElement>('#library-root .lib-detail .lib-blocks li .bar')?.style.background;
+settings.patch({ powerZoneBounds: zonesBefore });
+await settle();
+
+suite('the Library keeps the standard zones', () => {
+  const z3 = POWER_ZONES[2].color;
+  check('with Z2 to 78 %, a 77 % block is still Z3 in the list profile', steadyProfile === z3, String(steadyProfile));
+  check('in the detail profile', steadyLarge === z3, String(steadyLarge));
+  check('and in the detail block list', steadyBar === rgb(z3), String(steadyBar));
+});
+
+row('catalog:workout:vo2/The_Famous_40_20_s').click();
 type(filter('search'), 'vo2');
 const afterSearch = titles();
 type(filter('search'), 'zzz-nothing');

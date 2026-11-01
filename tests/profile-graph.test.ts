@@ -6,6 +6,8 @@ const { buildActivityFit } = await import('../src/activity/fit-export');
 const { computeMetrics } = await import('../src/session/metrics');
 const { decodeFit } = await import('../src/fit/decoder');
 const { check, near, report, suite } = await import('./harness');
+const settingsModule = await import('../src/core/settings');
+const zonesModule = await import('../src/core/zones');
 import type { Sample } from '../src/session/metrics';
 import type { SessionSnapshot } from '../src/session/session';
 import type { Segment, Workout } from '../src/workout/types';
@@ -210,6 +212,44 @@ suite('the summary\'s axis is the whole ride', () => {
   check('free ride of 40 minutes: 0–2400, not the last ten', span(wholeRideDomain(undefined, 2400)) === '0–2400');
   check('60-minute workout finished at 20: all 60 minutes', span(wholeRideDomain({ duration: 3600 }, 1200)) === '0–3600');
   check('an empty ride still has an axis', span(wholeRideDomain(undefined, 0)) === '0–60');
+});
+
+
+suite('graph blocks are coloured by the rider\'s zones', () => {
+  const { settings } = settingsModule;
+  const { POWER_ZONES } = zonesModule;
+  /** The fill colours a 77 % block is painted with. */
+  const fills = () => {
+    const workout: Workout = { name: 'z', duration: 600, segments: [block(0, 600, 0.77)], textEvents: [], source: 'zwo' };
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    const colours: string[] = [];
+    const realGetContext = canvas.getContext.bind(canvas);
+    canvas.getContext = ((kind: string) => {
+      const ctx = realGetContext(kind as '2d') as unknown as Record<string, unknown>;
+      ctx.fill = () => { colours.push(String(ctx.fillStyle)); };
+      return ctx;
+    }) as typeof canvas.getContext;
+    const graph = new ProfileGraph(canvas);
+    graph.setWorkout(workout);
+    graph.render({ workout, elapsed: 0, samples: [], segmentIndex: 0, state: 'idle', targetPower: 0 } as unknown as SessionSnapshot);
+    graph.dispose();
+    host.remove();
+    return colours;
+  };
+  const before = settings.current.powerZoneBounds;
+  try {
+    settings.patch({ powerZoneBounds: null });
+    check('with the formula a 77 % block is Z3', fills().includes(POWER_ZONES[2].color) && !fills().includes(POWER_ZONES[1].color),
+      JSON.stringify(fills()));
+    settings.patch({ powerZoneBounds: [0.55, 0.78, 0.90, 1.05, 1.20, 1.50] });
+    check('with Z2 to 78 % it is Z2', fills().includes(POWER_ZONES[1].color) && !fills().includes(POWER_ZONES[2].color),
+      JSON.stringify(fills()));
+  } finally {
+    settings.patch({ powerZoneBounds: before });
+  }
 });
 
 report();

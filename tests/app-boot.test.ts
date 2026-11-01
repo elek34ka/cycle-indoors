@@ -22,7 +22,8 @@ const { parseGpx } = await import('../src/activity/gpx');
 const { parseZwo } = await import('../src/workout/zwo');
 const { hideSummary } = await import('../src/ui/summary');
 const { setParts } = await import('../src/ui/dom');
-const { averages } = await import('../src/ui/ride-view');
+const { averages, tileStripe } = await import('../src/ui/ride-view');
+const { POWER_ZONES, HR_ZONES } = await import('../src/core/zones');
 const { readFileSync } = await import('node:fs');
 const { LIBRARY } = await import('../src/workout/library');
 
@@ -498,6 +499,51 @@ suite('blocks are labelled in watts and percent', () => {
 });
 settings.patch({ ftp: ftpBefore });
 
+// --- the rider's own zones on the ride screen --------------------------------
+type Snap = import('../src/session/session').SessionSnapshot;
+const Z2_78 = [0.55, 0.78, 0.90, 1.05, 1.20, 1.50];
+/** "#3f8fd8" as jsdom reports a style colour. */
+const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+const zoneSettingsBefore = { ftp: settings.current.ftp, hrMax: settings.current.hrMax };
+settings.patch({ ftp: 200, hrMax: 185, powerZoneBounds: null, hrZoneBounds: null });
+session.loadWorkout(parseZwo(`<workout_file><name>Zones</name><workout>
+  <SteadyState Duration="300" Power="0.50"/>
+  <SteadyState Duration="300" Power="0.77"/>
+</workout></workout_file>`, { ftp: 200 }));
+await wait(60);
+const barOf = (i: number) => doc.querySelectorAll<HTMLElement>('#segment-list li .bar').item(i);
+const listNode = barOf(1);
+const formulaBar = barOf(1)?.style.background;
+const ride = (extra: Partial<Snap>) => ({ ...session.snapshot, ...extra }) as Snap;
+const formulaTarget = tileStripe('target', ride({ targetPower: 154 }));
+settings.patch({ powerZoneBounds: Z2_78, hrZoneBounds: [0.60, 0.784, 0.80, 0.90] });
+await wait(60);
+const customBar = barOf(1)?.style.background;
+const customTarget = tileStripe('target', ride({ targetPower: 154 }));
+const customPower = tileStripe('power', ride({ smoothedPower: 154 }));
+const customHr = tileStripe('hr', ride({ smoothedHeartRate: 144 }));
+const ownFtp = { name: 'Own FTP', duration: 600, segments: [], textEvents: [], source: 'zwo', ftpOverride: 300 } as unknown as Snap['workout'];
+const at230 = tileStripe('target', ride({ workout: ownFtp, targetPower: 230 }));
+const at240 = tileStripe('target', ride({ workout: ownFtp, targetPower: 240 }));
+const power230 = tileStripe('power', ride({ workout: ownFtp, smoothedPower: 230 }));
+settings.patch({ ...zoneSettingsBefore, powerZoneBounds: null, hrZoneBounds: null });
+await wait(60);
+const resetBar = barOf(1)?.style.background;
+
+suite('the ride screen colours by the rider\'s zones', () => {
+  check('with the formula a 77 % block is Z3 in the list', formulaBar === rgb(POWER_ZONES[2].color), formulaBar);
+  check('and on the Target tile', formulaTarget === POWER_ZONES[2].color, formulaTarget);
+  check('with Z2 to 78 % the list recolours it Z2 without a reload', customBar === rgb(POWER_ZONES[1].color), customBar);
+  check('in place, without rebuilding the list', barOf(1) === listNode);
+  check('the Target tile stripe is Z2', customTarget === POWER_ZONES[1].color, customTarget);
+  check('and so is the Power tile at the same watts', customPower === POWER_ZONES[1].color, customPower);
+  check('144 bpm of 185 is HR Z2 with Z2 to 78.4 %', customHr === HR_ZONES[1].color, customHr);
+  check('a workout FTP of 300: 230 W is Z2', at230 === POWER_ZONES[1].color && power230 === POWER_ZONES[1].color,
+    `${at230} ${power230}`);
+  check('and 240 W is Z3', at240 === POWER_ZONES[2].color, at240);
+  check('back on the formula the block is Z3 again', resetBar === rgb(POWER_ZONES[2].color), resetBar);
+});
+
 suite('a dragged map still belongs to the ride view', () => {
   const panel = doc.querySelector<HTMLElement>('#view-ride .mini-map')!;
   const head = panel.querySelector<HTMLElement>('.mini-map-head')!;
@@ -523,8 +569,11 @@ suite('tabs and the devices panel', () => {
   check('the settings view became active', doc.querySelector('#view-settings')?.classList.contains('active'));
   check('the ride view is hidden', !doc.querySelector('#view-ride')?.classList.contains('active'));
   check('the settings form rendered its number fields',
-    doc.querySelectorAll('#settings-form input[type="number"]').length === 6,
-    `got ${doc.querySelectorAll('#settings-form input[type="number"]').length}`);
+    doc.querySelectorAll('#settings-form .field-grid input[type="number"]').length === 6,
+    `got ${doc.querySelectorAll('#settings-form .field-grid input[type="number"]').length}`);
+  check('and the training zones as two buttons, their fields kept in pop-ups',
+    doc.querySelectorAll('#settings-form .zone-editor .zone-edit').length === 2
+      && doc.querySelectorAll('#settings-form .zone-editor input').length === 0);
   check('the settings form rendered its toggles',
     doc.querySelectorAll('#settings-form input[type="checkbox"]').length === 3,
     `got ${doc.querySelectorAll('#settings-form input[type="checkbox"]').length}`);

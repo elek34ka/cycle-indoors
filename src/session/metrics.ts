@@ -1,4 +1,4 @@
-import { HR_ZONES, POWER_ZONES, zoneForHr, zoneForRatio } from '../core/zones';
+import { HR_ZONES, POWER_ZONES, zoneForHr, zoneForRatio, type RiderZones } from '../core/zones';
 
 export interface Sample {
   /** seconds of elapsed ride time */
@@ -70,7 +70,13 @@ export function normalisedPower(powers: number[], window = 30): number {
   return ((quartics.reduce((s, v) => s + v, 0) / quartics.length)) ** 0.25;
 }
 
-export function computeMetrics(samples: Sample[], ftp: number, hrMax?: number): RideMetrics {
+/** Time in zones is measured against `zones`, the rider's own; the standard zones without them. */
+export function computeMetrics(
+  samples: Sample[],
+  ftp: number,
+  hrMax?: number,
+  zones: RiderZones = { power: POWER_ZONES, hr: HR_ZONES },
+): RideMetrics {
   const powers = samples.map((s) => s.power);
   const hrs = samples.map((s) => s.heartRate).filter((v): v is number => v !== undefined && v > 0);
   const cads = samples.map((s) => s.cadence).filter((v): v is number => v !== undefined);
@@ -84,7 +90,7 @@ export function computeMetrics(samples: Sample[], ftp: number, hrMax?: number): 
 
   const seconds = new Map<number, number>();
   for (const s of samples) {
-    const z = zoneForRatio(ftp > 0 ? s.power / ftp : 0);
+    const z = zoneForRatio(ftp > 0 ? s.power / ftp : 0, zones.power);
     seconds.set(z.id, (seconds.get(z.id) ?? 0) + 1);
   }
 
@@ -92,7 +98,7 @@ export function computeMetrics(samples: Sample[], ftp: number, hrMax?: number): 
   if (hrMax && hrMax > 0) {
     for (const s of samples) {
       if (!(s.heartRate && s.heartRate > 0)) continue;
-      const z = zoneForHr(s.heartRate, hrMax);
+      const z = zoneForHr(s.heartRate, hrMax, zones.hr);
       hrSeconds.set(z.id, (hrSeconds.get(z.id) ?? 0) + 1);
     }
   }
@@ -138,10 +144,10 @@ export function computeMetrics(samples: Sample[], ftp: number, hrMax?: number): 
     hasPosition: firstFix !== undefined,
     startLat: firstFix?.lat,
     startLon: firstFix?.lon,
-    zones: POWER_ZONES.map((z) => ({
+    zones: zones.power.map((z) => ({
       zone: z.id, label: z.label, color: z.color, seconds: seconds.get(z.id) ?? 0,
     })),
-    hrZones: HR_ZONES.map((z) => ({
+    hrZones: zones.hr.map((z) => ({
       zone: z.id, label: z.label, color: z.color, seconds: hrSeconds.get(z.id) ?? 0,
     })),
     compliance,

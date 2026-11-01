@@ -1,6 +1,7 @@
 import { Emitter } from './pubsub';
 import { PRESETS, matchPreset, type SmoothingParams, type SmoothingPreset } from '../activity/smoothing';
 import { NO_FILTERS, type LibraryFilters, type LibrarySection } from '../library/filter';
+import { DEFAULT_BOUNDS, boundsProblem, type ZoneKind } from './zones';
 
 export interface Settings {
   ftp: number;            // W
@@ -29,6 +30,10 @@ export interface Settings {
   /** the Library's open section and its search and filters */
   librarySection: LibrarySection;
   libraryFilters: LibraryFilters;
+  /** the rider's power zones: upper bounds of Z1–Z6 as fractions of FTP; null is the formula */
+  powerZoneBounds: number[] | null;
+  /** the rider's heart-rate zones: upper bounds of Z1–Z4 as fractions of max HR; null is the formula */
+  hrZoneBounds: number[] | null;
 }
 
 const DEFAULTS: Settings = {
@@ -49,6 +54,8 @@ const DEFAULTS: Settings = {
   stravaAutoUpload: false,
   librarySection: 'workouts',
   libraryFilters: NO_FILTERS,
+  powerZoneBounds: null,
+  hrZoneBounds: null,
 };
 
 const KEY = 'cycle-indoors.settings.v1';
@@ -105,7 +112,21 @@ export function restoreSettings(saved: Partial<Settings>): Settings {
     routeSmoothing: { ...value.routeSmoothing, preset: matchPreset(value.routeSmoothing) },
     // filters added later still get their defaults
     libraryFilters: { ...NO_FILTERS, ...saved.libraryFilters },
+    // zones that break the rules (a corrupt save or backup) fall back to the formula
+    powerZoneBounds: boundsProblem('power', value.powerZoneBounds) ? null : [...value.powerZoneBounds!],
+    hrZoneBounds: boundsProblem('hr', value.hrZoneBounds) ? null : [...value.hrZoneBounds!],
   };
+}
+
+/**
+ * The bounds to store for zone upper bounds edited in %: fractions rounded to
+ * 0.1 % (so 78.4 is 0.784, not 0.7840000000000001), or null when they are the
+ * formula's, so an unedited zone set keeps following the formula.
+ */
+export function zoneBoundsFromPercent(kind: ZoneKind, percents: readonly number[]): number[] | null {
+  const bounds = percents.map((p) => Math.round(p * 10) / 1000);
+  const formula = DEFAULT_BOUNDS[kind];
+  return bounds.length === formula.length && bounds.every((b, i) => b === formula[i]) ? null : bounds;
 }
 
 class SettingsStore extends Emitter<{ change: Settings }> {

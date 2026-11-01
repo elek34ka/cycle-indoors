@@ -1,5 +1,6 @@
 import { fileStamp, hhmmss, km, stamp } from '../core/format';
 import { settings } from '../core/settings';
+import { riderZones } from '../core/zones';
 import { buildActivityFit, downloadBlob, downloadBytes } from '../activity/fit-export';
 import { computeMetrics } from '../session/metrics';
 import { session, type SessionSnapshot } from '../session/session';
@@ -135,6 +136,7 @@ function imageRow(
         elapsed: Math.max(snapshot.elapsed || 0, lastT),
         ftp,
         hrMax: settings.current.hrMax,
+        powerZones: riderZones(settings.current).power,
         smoothWindow: settings.current.smoothPowerSeconds,
       },
       ...(course?.hasElevation ? {
@@ -192,7 +194,8 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
 
   const ftp = snapshot.workout?.ftpOverride ?? settings.current.ftp;
   const samples = [...snapshot.samples];
-  const metrics = computeMetrics(samples, ftp, settings.current.hrMax);
+  // The zones in Settings at Finish measure the whole ride, edits made mid-ride included.
+  const metrics = computeMetrics(samples, ftp, settings.current.hrMax, riderZones(settings.current));
   const title = snapshot.workout?.name ?? 'Free ride';
   const startedAt = session.startedAt ?? new Date();
   // What was ridden is what was loaded when the summary opened, whatever is loaded later.
