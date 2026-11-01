@@ -267,11 +267,26 @@ suite('the callback page matches the client', () => {
     check('names the activity', form.get('name') === 'Sweet Spot');
     check('passes the description', form.get('description') === 'indoors');
     check('marks it as a trainer ride', form.get('trainer') === '1');
+    check('and asks for no sport type', form.get('sport_type') === null, String(form.get('sport_type')));
     check('sets the external id for duplicate detection', form.get('external_id') === 'cycle-indoors-20261025-0700.fit');
     check('polls until Strava has made the activity', polls === 3, String(polls));
     check('returns the activity and its link',
       result.kind === 'created' && result.activityId === 555 && result.url === 'https://www.strava.com/activities/555');
     check('reports its progress', progress.join(' → ') === 'Uploading… → Processing…', progress.join(' → '));
+  });
+}
+
+// A ride with a GPS track: Strava hides the map of a trainer ride.
+{
+  const { client, browser } = await connected({
+    [`${STRAVA.apiBase}/uploads`]: () => Response.json({ id: 78, activity_id: 556 }),
+  });
+  await client.upload(new Uint8Array([1]), { name: 'Alpe Loop', externalId: 'route.fit', virtual: true });
+  const form = browser.calls.find((c) => c.url === `${STRAVA.apiBase}/uploads`)?.body as FormData | undefined;
+
+  suite('an upload of a ride with a GPS track', () => {
+    check('asks for a virtual ride', form?.get('sport_type') === 'VirtualRide', String(form?.get('sport_type')));
+    check('is not flagged as a trainer ride', form?.get('trainer') === null, String(form?.get('trainer')));
   });
 }
 

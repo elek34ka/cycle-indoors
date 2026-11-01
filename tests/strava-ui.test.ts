@@ -289,6 +289,43 @@ suite('the description\'s zones are the rider\'s', () => {
   const power = lines.find((l) => l.startsWith('Power zones: '));
   check('the power zone line reads Z2 20:00', power === 'Power zones: Z2 20:00', String(power));
 });
+
+// A ride on a route: every sample carries a GPS fix, as the session records
+// them, so the .fit has a track and Strava must not be told it is a trainer ride.
+const routeRide = (start: Date): SessionSnapshot => {
+  const ride = finishedRide(start);
+  return {
+    ...ride,
+    samples: ride.samples.map((s) => ({ ...s, lat: 50.06 + s.t * 1e-5, lon: 19.94, altitude: 220 })),
+  } as unknown as SessionSnapshot;
+};
+courseStore.load(hilly);
+uploadReply = () => Response.json({ id: 8, activity_id: 88 });
+showSummary(routeRide(new Date('2026-10-25T15:00:00')));
+await until(() => summaryStrava()?.textContent === 'View on Strava');
+const autoRouteForm = uploadForms.at(-1);
+
+settings.patch({ stravaAutoUpload: false });
+uploadReply = () => Response.json({ id: 9, activity_id: 99 });
+showSummary(routeRide(new Date('2026-10-25T16:00:00')));
+courseStore.unload();
+summaryStrava()!.click();
+await until(() => summaryStrava()?.textContent === 'View on Strava');
+const unloadedRouteForm = uploadForms.at(-1);
+
+suite('the activity type Strava receives', () => {
+  check('a free ride without a route is a trainer ride', autoForm?.get('trainer') === '1', String(autoForm?.get('trainer')));
+  check('and asks for no sport type', autoForm?.get('sport_type') === null, String(autoForm?.get('sport_type')));
+  check('a workout without a route is a trainer ride too', autoWorkoutForm?.get('trainer') === '1'
+    && autoWorkoutForm?.get('sport_type') === null);
+  check('auto-upload of a route ride asks for a virtual ride',
+    autoRouteForm?.get('sport_type') === 'VirtualRide', String(autoRouteForm?.get('sport_type')));
+  check('and is not flagged as a trainer ride', autoRouteForm?.get('trainer') === null, String(autoRouteForm?.get('trainer')));
+  check('a route unloaded before pressing Upload still sends a virtual ride',
+    unloadedRouteForm !== autoRouteForm && unloadedRouteForm?.get('sport_type') === 'VirtualRide',
+    String(unloadedRouteForm?.get('sport_type')));
+  check('with no trainer flag', unloadedRouteForm?.get('trainer') === null, String(unloadedRouteForm?.get('trainer')));
+});
 settings.patch({ stravaAutoUpload: false });
 
 report();

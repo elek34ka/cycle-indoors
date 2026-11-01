@@ -60,6 +60,8 @@ export interface UploadMeta {
   description?: string;
   /** also the file name; Strava uses it to spot the same ride sent twice */
   externalId: string;
+  /** the `.fit` carries a GPS track (a route was ridden) */
+  virtual?: boolean;
 }
 
 export type UploadResult =
@@ -230,7 +232,10 @@ export class StravaClient extends Emitter<{ status: StravaStatus }> {
     form.append('data_type', 'fit');
     form.append('name', meta.name);
     if (meta.description) form.append('description', meta.description);
-    form.append('trainer', '1');
+    // Strava hides the map of a trainer ride, so a ride with a track goes up as
+    // a virtual ride instead. `trainer` is ignored once `sport_type` is sent.
+    if (meta.virtual) form.append('sport_type', 'VirtualRide');
+    else form.append('trainer', '1');
     form.append('external_id', meta.externalId);
 
     onProgress?.('Uploading…');

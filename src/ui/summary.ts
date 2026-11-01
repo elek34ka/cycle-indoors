@@ -293,7 +293,9 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
         },
       },
     }),
-    samples.length > 0 ? stravaButton(startedAt, () => ({ bytes: buildFit(), name: title, fileName, description }), personal) : null,
+    samples.length > 0 ? stravaButton(startedAt, () => ({
+      bytes: buildFit(), name: title, fileName, description, virtual: metrics.hasPosition,
+    }), personal) : null,
     download,
   ]));
 
@@ -301,8 +303,9 @@ export function showSummary(snapshot: SessionSnapshot, personal?: PersonalLibrar
   overlay.classList.remove('hidden');
 }
 
-/** What an upload sends: the `.fit`, its name and file name, and the description. */
-interface RideUpload { bytes: Uint8Array; name: string; fileName: string; description: string }
+/** What an upload sends: the `.fit`, its name and file name, the description,
+ *  and whether the `.fit` carries a GPS track (a virtual ride, with a map). */
+interface RideUpload { bytes: Uint8Array; name: string; fileName: string; description: string; virtual: boolean }
 
 /**
  * Upload to Strava, or a link to the activity once it is there. With
@@ -369,8 +372,8 @@ async function uploadRide(
 
   set({ busy: 'Uploading…' });
   try {
-    const { bytes, name, fileName, description } = ride();
-    const result = await strava.upload(bytes, { name, description, externalId: fileName }, (busy) => set({ busy }));
+    const { bytes, name, fileName, description, virtual } = ride();
+    const result = await strava.upload(bytes, { name, description, externalId: fileName, virtual }, (busy) => set({ busy }));
     set({ result });
     // The ride log links to the activity, whether new or one Strava already had.
     if (result.kind !== 'processing' && result.activityId !== undefined) void personal?.setRideStrava(key, result.activityId);

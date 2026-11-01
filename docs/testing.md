@@ -226,7 +226,9 @@
   an unticked upload permission, cancel and a blocked pop-up; tokens kept
   across a reload; a refresh two minutes before expiry that rotates the
   refresh token under the lock; a revoked app forgetting its tokens; the
-  upload's form fields, polling, duplicate, processing error, rate limit,
+  upload's form fields (a ride without a GPS track is `trainer=1` with no
+  `sport_type`, one with a track is `sport_type=VirtualRide` with no
+  `trainer`, so Strava shows its map), polling, duplicate, processing error, rate limit,
   401, a slow Strava and no network; disconnect with and without Strava
   reachable. It also checks `public/strava-callback.html` uses the same
   channel.
@@ -242,7 +244,10 @@
   summary opened on even when another is loaded before the click. Exactly one
   file goes to Strava, the `.fit`; the images never do. With the rider's Z2
   ending at 78 %, 20 minutes at 154 W of a 200 W FTP is described as
-  `Power zones: Z2 20:00`.
+  `Power zones: Z2 20:00`. Rides without a route (free ride and workout) are
+  sent as `trainer=1` with no `sport_type`. Rides whose samples carry GPS
+  fixes are sent as `sport_type=VirtualRide` with no `trainer`, by auto-upload
+  and by the button, even with the route unloaded before the click.
 - **catalog-index** — the index check: a newer major version is refused as
   "needs a newer version of the app", minor versions pass, and damaged
   indexes (no version, a route without a file, an id of the wrong kind) are

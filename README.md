@@ -100,6 +100,10 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   Settings. The activity's description names the route and the workout, then
   lists the summary's numbers and time in your zones. Strava's own zone
   charts on the activity use the zones in your Strava account, not these.
+  A route ride goes up as a Virtual Ride with its map; a ride without a route
+  as an indoor (trainer) ride. Route rides uploaded before this was fixed went
+  up as trainer rides, which Strava shows without a map: edit the activity on
+  strava.com and untick the indoor/trainer option to bring the map back.
 - **My rides**: a log of every finished ride's numbers. **Ride same session**
   loads the same workout and route again.
 
