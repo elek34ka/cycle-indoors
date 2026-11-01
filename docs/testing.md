@@ -220,17 +220,27 @@
   code exchange and a refresh each carry the client id and secret with the
   right grant type; the reply keeps the tokens, expiry and scope, drops the
   athlete and never echoes the secret; Strava's errors and an unreachable
-  Strava reach the app with CORS headers intact.
-- **strava** — the Strava client against a fake Strava, relay, pop-up and
-  storage: the approval URL, an answer for another attempt ignored, refusal,
+  Strava reach the app with CORS headers intact. The forwarded API calls: a
+  hand-built multipart upload reaches Strava byte for byte with the same
+  boundary and the rider's bearer, no secret and no other header; upload
+  status, athlete and deauthorize go to the right Strava URLs; Strava's 401,
+  429 and processing-error bodies come back unchanged, and an unreachable
+  Strava is a 502. A missing bearer is a 401, any path outside the five
+  routes a 404 and a wrong method a 405, an unlisted origin a 403 without
+  CORS headers, none reaching Strava; preflight allows `authorization`.
+- **strava** — the Strava client against a fake relay (tokens and forwarded
+  Strava calls), pop-up and storage: the approval URL, an answer for another attempt ignored, refusal,
   an unticked upload permission, cancel and a blocked pop-up; tokens kept
   across a reload; a refresh two minutes before expiry that rotates the
   refresh token under the lock; a revoked app forgetting its tokens; the
   upload's form fields (a ride without a GPS track is `trainer=1` with no
   `sport_type`, one with a track is `sport_type=VirtualRide` with no
   `trainer`, so Strava shows its map), polling, duplicate, processing error, rate limit,
-  401, a slow Strava and no network; disconnect with and without Strava
-  reachable. It also checks `public/strava-callback.html` uses the same
+  401, a slow Strava, no network ("could not reach the upload service") and
+  a relay answering 502 ("Strava could not be reached", still connected);
+  disconnect with and without the relay reachable. Across connect, a refresh,
+  an upload with polling, the athlete and disconnect, every request goes to
+  the relay and none to `strava.com`; only the pop-up opens Strava. It also checks `public/strava-callback.html` uses the same
   channel.
 - **strava-ui** — the Settings panel and the summary in jsdom with the real
   client, faking only the network and `window.open`: connect through the
@@ -247,7 +257,11 @@
   `Power zones: Z2 20:00`. Rides without a route (free ride and workout) are
   sent as `trainer=1` with no `sport_type`. Rides whose samples carry GPS
   fixes are sent as `sport_type=VirtualRide` with no `trainer`, by auto-upload
-  and by the button, even with the route unloaded before the click.
+  and by the button, even with the route unloaded before the click. A 502
+  from the relay is reported as Strava being unreachable and leaves the
+  button to press again. Across the whole file, no request goes to
+  `strava.com`: every one goes to the relay, and each connect opens Strava's
+  own approval page.
 - **catalog-index** — the index check: a newer major version is refused as
   "needs a newer version of the app", minor versions pass, and damaged
   indexes (no version, a route without a file, an id of the wrong kind) are

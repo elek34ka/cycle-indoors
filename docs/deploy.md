@@ -1,31 +1,52 @@
 # Server-side pieces
 
 The app is a static site. Two small Cloudflare Workers sit beside it: the
-Strava token relay and the backup vault. Each is deployed on its own, from
+Strava relay and the backup vault. Each is deployed on its own, from
 its own folder, and neither is needed to run the app locally.
 
-## Strava token relay
+## Strava relay
 
 Strava's OAuth token exchange and every token refresh require the app's client
 secret, and Strava offers no PKCE or other flow for browser-only apps — so a
-static site cannot connect to Strava on its own. `relay/src/index.ts` is the
-smallest thing that fixes that: a Cloudflare Worker (free plan) that adds the
-secret to those two calls and nothing else.
+static site cannot connect to Strava on its own. `relay/src/index.ts` is a
+Cloudflare Worker (free plan) that adds the secret to those two calls. It also
+forwards the few Strava API calls the app makes once connected, so a rider
+whose browser cannot reach `strava.com` (Strava is blocked in some countries)
+needs it only for the approval page.
 
 ```
 browser ── {code} or {refresh_token} ──▶ relay ── + client_secret ──▶ strava.com/oauth/token
 browser ◀── access_token, refresh_token, expires_at, scope ──────────────────┘
-browser ── POST /api/v3/uploads (Bearer token, .fit) ─────────────────────▶ Strava, direct
+browser ── POST /strava/uploads (Bearer, .fit) ──▶ relay ── as is ──▶ strava.com/api/v3/uploads
+browser ◀── Strava's status and body, unchanged ─────────────────────────────┘
 ```
 
-- **Stateless.** No storage, no logs of request bodies. The athlete profile in
-  Strava's reply is dropped; only the tokens, expiry and scope come back.
-- **Ride files never pass through it.** Strava's API sends
-  `Access-Control-Allow-Origin: *`, so the browser uploads directly.
+| Relay route | Method | Forwarded to |
+|---|---|---|
+| `/` | POST | `www.strava.com/oauth/token`, client id and secret added |
+| `/strava/uploads` | POST | `www.strava.com/api/v3/uploads` |
+| `/strava/uploads/<digits>` | GET | `www.strava.com/api/v3/uploads/<digits>` |
+| `/strava/athlete` | GET | `www.strava.com/api/v3/athlete` |
+| `/strava/deauthorize` | POST | `www.strava.com/oauth/deauthorize` |
+
+Any other path is a 404 and a wrong method a 405, before Strava is contacted.
+Strava's API moves to `https://api-v3.strava.com` from 2027-01-04; that is
+`STRAVA_API_BASE` in the relay, so the app needs no release for it.
+
+- **Stateless.** No storage, no logs. The athlete profile in Strava's token
+  reply is dropped; only the tokens, expiry and scope come back.
+- **Ride files are forwarded, never stored or logged.** The body is passed on
+  byte for byte with only its `Content-Type` and the rider's own
+  `Authorization: Bearer` header; the client secret is never added to these
+  calls, and uploads and athlete without a bearer are a 401. Strava's status
+  and body come back unchanged, so the app reads 401, 429 and processing
+  errors as if it had called Strava itself. Tokens stay in the browser.
 - **Origin allow-list** (`APP_ORIGINS` in `relay/wrangler.toml`): the Pages
-  site and the dev server. It stops other sites' pages from using the relay
-  through a visitor's browser; it is not access control, and does not need to
-  be — a code is only useful for this app's own client id.
+  site and the dev server, on every route. It stops other sites' pages from
+  using the relay through a visitor's browser; it is not access control, and
+  does not need to be — a code is only useful for this app's own client id,
+  and a forwarded call can do nothing its token could not do against Strava
+  directly.
 - Bad input is a 400 before Strava is contacted, Strava's own errors are passed
   through with its status, and an unreachable Strava is a 502.
 
@@ -61,6 +82,16 @@ curl -X POST https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.d
      -H "Origin: http://127.0.0.1:5173" -H "content-type: application/json" \
      -d '{"code":"nope"}'
 ```
+
+and a forwarded call without a token must be refused by the relay itself:
+
+```sh
+curl -i https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev/strava/athlete \
+     -H "Origin: http://127.0.0.1:5173"      # → HTTP/2 401, "unauthorized"
+```
+
+Deploy the relay **before** an app build that uses a new route. `POST /` never
+changes shape, so pages still open on an older build keep working.
 
 ## Backup vault
 

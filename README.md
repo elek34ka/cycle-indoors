@@ -104,6 +104,9 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   as an indoor (trainer) ride. Route rides uploaded before this was fixed went
   up as trainer rides, which Strava shows without a map: edit the activity on
   strava.com and untick the indoor/trainer option to bring the map back.
+  Only connecting needs `strava.com` itself to be reachable: after that,
+  uploads go through the app's relay, so where Strava is blocked a VPN is
+  needed for Connect and not for each upload.
 - **My rides**: a log of every finished ride's numbers. **Ride same session**
   loads the same workout and route again.
 
@@ -117,7 +120,9 @@ key that only you hold. **Lose the key and the backup is gone.** Restoring
 
 ## What leaves the browser
 
-Nothing, unless you send a ride to Strava or make a backup. Settings are kept
+Nothing, unless you send a ride to Strava or make a backup. A Strava upload
+goes through the app's relay (`relay/`), which passes the `.fit` and your
+Strava access token on to Strava and keeps neither. Settings are kept
 in `localStorage`, and My library, done marks and the ride log in IndexedDB.
 **The ride itself lives only in memory** until you download or upload it, so
 reloading the page loses an unsaved ride.
@@ -149,7 +154,7 @@ src/
   ride-log/    the ride log's entry for a finished ride
   backup/      recovery key, encryption, the profile, the vault client
 public/        copied verbatim into the build: strava-callback.html
-relay/         Strava token relay, a Cloudflare Worker
+relay/         Strava relay (tokens and forwarded API calls), a Cloudflare Worker
 vault/         encrypted backup store, a Cloudflare Worker over a private R2 bucket
 scripts/       test runner, catalog build/sync
 tests/         Node-run suites, including full app boots in jsdom
@@ -169,7 +174,7 @@ samples/       a workout and a route to try the loaders on
 
 ## Documentation
 
-- [docs/deploy.md](docs/deploy.md): the Strava token relay and the backup
+- [docs/deploy.md](docs/deploy.md): the Strava relay and the backup
   vault (what they do, and how to deploy them).
 - [docs/catalog.md](docs/catalog.md): the content catalog, covering the
   `content/` layout, training plans as folders, and publishing to R2.

@@ -17,7 +17,7 @@ const NOW = 1_800_000_000; // unix seconds
 interface Call { url: string; method: string; headers: Record<string, string>; body: unknown }
 
 /**
- * A browser with a fake Strava, relay, pop-up and storage. `routes` answers
+ * A browser with a fake relay (tokens and forwarded Strava calls), pop-up and storage. `routes` answers
  * each request by URL; every request is recorded.
  */
 function fakeBrowser(routes: Record<string, (call: Call) => Response | Promise<Response>> = {}) {
@@ -40,7 +40,9 @@ function fakeBrowser(routes: Record<string, (call: Call) => Response | Promise<R
         body: init.body,
       };
       calls.push(call);
-      const route = Object.keys(routes).find((prefix) => url.startsWith(prefix));
+      // Longest prefix wins: the token URL is a prefix of every forwarded call's.
+      const route = Object.keys(routes).filter((prefix) => url.startsWith(prefix))
+        .sort((a, b) => b.length - a.length)[0];
       if (!route) throw new TypeError(`no route for ${url}`);
       return routes[route](call);
     }) as typeof fetch,
@@ -80,7 +82,7 @@ const tokens = (n: number, expiresAt = NOW + 6 * 3600) => Response.json({
 });
 const relayRoute = (handler: (body: Record<string, string>) => Response) =>
   ({ [STRAVA.relayUrl]: (c: Call) => handler(JSON.parse(String(c.body))) });
-const athleteRoute = { [`${STRAVA.apiBase}/athlete`]: () => Response.json({ firstname: 'Ada', lastname: 'Rider' }) };
+const athleteRoute = { [`${STRAVA.relayApi}/athlete`]: () => Response.json({ firstname: 'Ada', lastname: 'Rider' }) };
 
 /** A client that has connected once, with a token valid for six hours. */
 async function connected(routes: Record<string, (call: Call) => Response | Promise<Response>> = {}) {
@@ -204,7 +206,7 @@ suite('the callback page matches the client', () => {
 
 {
   const { client, browser } = await connected({
-    [`${STRAVA.apiBase}/uploads`]: () => Response.json({ id: 1, status: 'Your activity is ready.', activity_id: 42 }),
+    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 1, status: 'Your activity is ready.', activity_id: 42 }),
   });
   await client.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' });
   const noRefresh = !browser.calls.some((c) => c.url === STRAVA.relayUrl);
@@ -245,10 +247,10 @@ suite('the callback page matches the client', () => {
 {
   let polls = 0;
   const { client, browser } = await connected({
-    [`${STRAVA.apiBase}/uploads/77`]: () => Response.json(
+    [`${STRAVA.relayApi}/uploads/77`]: () => Response.json(
       ++polls < 3 ? { id: 77, status: 'Your activity is still being processed.' } : { id: 77, activity_id: 555 },
     ),
-    [`${STRAVA.apiBase}/uploads`]: () => Response.json({ id: 77, status: 'Your activity is still being processed.' }),
+    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 77, status: 'Your activity is still being processed.' }),
   });
   const progress: string[] = [];
   const result = await client.upload(new Uint8Array([9, 8, 7]), {
@@ -259,7 +261,7 @@ suite('the callback page matches the client', () => {
   const file = form.get('file') as File;
 
   suite('an upload', () => {
-    check('posts to /uploads', post.url === `${STRAVA.apiBase}/uploads` && post.method === 'POST');
+    check('posts to /uploads', post.url === `${STRAVA.relayApi}/uploads` && post.method === 'POST');
     check('authorises with the access token', post.headers.Authorization === 'Bearer acc1');
     check('sends the file as FIT', form.get('data_type') === 'fit');
     check('names the file by its external id', file?.name === 'cycle-indoors-20261025-0700.fit', file?.name);
@@ -279,10 +281,10 @@ suite('the callback page matches the client', () => {
 // A ride with a GPS track: Strava hides the map of a trainer ride.
 {
   const { client, browser } = await connected({
-    [`${STRAVA.apiBase}/uploads`]: () => Response.json({ id: 78, activity_id: 556 }),
+    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 78, activity_id: 556 }),
   });
   await client.upload(new Uint8Array([1]), { name: 'Alpe Loop', externalId: 'route.fit', virtual: true });
-  const form = browser.calls.find((c) => c.url === `${STRAVA.apiBase}/uploads`)?.body as FormData | undefined;
+  const form = browser.calls.find((c) => c.url === `${STRAVA.relayApi}/uploads`)?.body as FormData | undefined;
 
   suite('an upload of a ride with a GPS track', () => {
     check('asks for a virtual ride', form?.get('sport_type') === 'VirtualRide', String(form?.get('sport_type')));
@@ -292,7 +294,7 @@ suite('the callback page matches the client', () => {
 
 {
   const outcome = async (reply: () => Response) => {
-    const { client } = await connected({ [`${STRAVA.apiBase}/uploads`]: reply });
+    const { client } = await connected({ [`${STRAVA.relayApi}/uploads`]: reply });
     return client.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' })
       .then((r) => r, (e: Error) => e);
   };
@@ -300,17 +302,22 @@ suite('the callback page matches the client', () => {
   const bad = await outcome(() => Response.json({ id: 1, error: 'Improperly formatted <b>data</b>' }));
   const limited = await outcome(() => new Response('', { status: 429 }));
   const { client: revoked, browser: revokedBrowser } = await connected({
-    [`${STRAVA.apiBase}/uploads`]: () => new Response('', { status: 401 }),
+    [`${STRAVA.relayApi}/uploads`]: () => new Response('', { status: 401 }),
   });
   const revokedError = await revoked.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' }).catch((e) => e);
   const { client: slow } = await connected({
-    [`${STRAVA.apiBase}/uploads`]: () => Response.json({ id: 5, status: 'Your activity is still being processed.' }),
+    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 5, status: 'Your activity is still being processed.' }),
   });
   const slowResult = await slow.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' });
   const offline = fakeBrowser({});
   offline.store.set('cycle-indoors.strava.v1', JSON.stringify({ accessToken: 'a', refreshToken: 'r', expiresAt: NOW + 3600, scope: '' }));
   const offlineError = await new StravaClient(offline.deps)
     .upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' }).catch((e: Error) => e);
+  const { client: stravaDownClient } = await connected({
+    [`${STRAVA.relayApi}/uploads`]: () => new Response('strava unreachable', { status: 502 }),
+  });
+  const stravaDown = await stravaDownClient.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' })
+    .catch((e: Error) => e);
 
   suite('upload outcomes', () => {
     check('a duplicate is reported with a link to the existing activity',
@@ -322,17 +329,21 @@ suite('the callback page matches the client', () => {
     check('and forgets the tokens', revoked.status === 'disconnected' && revokedBrowser.store.size === 0);
     check('a slow Strava ends as "processing", not as a failure',
       slowResult.kind === 'processing', JSON.stringify(slowResult));
-    check('no network is explained', offlineError instanceof Error && /Could not reach Strava/.test(offlineError.message));
+    check('no network is explained', offlineError instanceof Error
+      && offlineError.message === 'Could not reach the upload service. Check the connection and try again.', String(offlineError));
+    check('a Strava the relay cannot reach is explained', stravaDown instanceof Error
+      && stravaDown.message === 'Strava could not be reached. Try again later.', String(stravaDown));
+    check('and is not "connect again"', !(stravaDown instanceof StravaNotConnected) && stravaDownClient.status === 'connected');
   });
 }
 
 {
-  const { client, browser } = await connected({ [STRAVA.deauthorizeUrl]: () => Response.json({}) });
+  const { client, browser } = await connected({ [`${STRAVA.relayApi}/deauthorize`]: () => Response.json({}) });
   await client.disconnect();
-  const deauth = browser.calls.find((c) => c.url === STRAVA.deauthorizeUrl);
+  const deauth = browser.calls.find((c) => c.url === `${STRAVA.relayApi}/deauthorize`);
 
   const { client: offline, browser: offlineBrowser } = await connected({
-    [STRAVA.deauthorizeUrl]: () => { throw new TypeError('offline'); },
+    [`${STRAVA.relayApi}/deauthorize`]: () => { throw new TypeError('offline'); },
   });
   await offline.disconnect();
 
@@ -342,6 +353,43 @@ suite('the callback page matches the client', () => {
     check('forgets the tokens', client.status === 'disconnected' && browser.store.size === 0);
     check('forgets them even when Strava cannot be reached',
       offline.status === 'disconnected' && offlineBrowser.store.size === 0);
+  });
+}
+
+// Once connected, nothing goes to strava.com: it may be blocked where the rider is.
+{
+  let issued = 0;
+  let polls = 0;
+  const browser = fakeBrowser({
+    // the refreshed token lasts six hours from when it is issued, past the jump below
+    ...relayRoute(() => (++issued === 1 ? tokens(1) : tokens(issued, NOW + 13 * 3600))),
+    ...athleteRoute,
+    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 90, status: 'Your activity is still being processed.' }),
+    [`${STRAVA.relayApi}/uploads/90`]: () => Response.json(++polls < 2 ? { id: 90 } : { id: 90, activity_id: 900 }),
+    [`${STRAVA.relayApi}/deauthorize`]: () => Response.json({}),
+  });
+  const client = new StravaClient(browser.deps);
+  const done = client.connect();
+  await flush();
+  browser.callback({ code: 'c0de', scope: 'read,activity:write' });
+  await done;
+  browser.advance(7 * 3600); // the next upload refreshes first
+  const result = await client.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' });
+  await client.disconnect();
+  const urls = browser.calls.map((c) => c.url);
+  const onStrava = urls.filter((u) => new URL(u).hostname.endsWith('strava.com'));
+  const used = (path: string) => urls.includes(`${STRAVA.relayApi}${path}`);
+
+  suite('once connected, only the relay is called', () => {
+    check('only the approval pop-up opens Strava', browser.popups.length === 1
+      && browser.popups[0].startsWith(STRAVA.authorizeUrl));
+    check('no request goes to strava.com', onStrava.length === 0, onStrava.join(' '));
+    check('every request goes to the relay', urls.every((u) => u.startsWith(STRAVA.relayUrl)), urls.join(' '));
+    check('the code exchange and the refresh both went to it',
+      browser.calls.filter((c) => c.url === STRAVA.relayUrl).length === 2);
+    check('so did the athlete, the upload, its polls and the deauthorize',
+      used('/athlete') && used('/uploads') && used('/uploads/90') && used('/deauthorize'), urls.join(' '));
+    check('and the ride was created', result.kind === 'created' && result.activityId === 900, JSON.stringify(result));
   });
 }
 

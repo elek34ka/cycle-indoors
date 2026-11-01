@@ -28,9 +28,9 @@ async function until(condition: () => boolean, ms = 2000): Promise<boolean> {
   return condition();
 }
 
-/** Strava, the relay and the pop-up, faked at the browser's edges. */
+/** The relay (tokens and forwarded Strava calls) and the pop-up, faked at the browser's edges. */
 const requests: { url: string; method: string }[] = [];
-/** the form of every upload Strava received, in order */
+/** the form of every upload the relay received for Strava, in order */
 const uploadForms: FormData[] = [];
 let uploadReply: () => Response = () => Response.json({ id: 1, activity_id: 4242 });
 globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
@@ -39,12 +39,12 @@ globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
   if (url === STRAVA.relayUrl) {
     return Response.json({ access_token: 'acc', refresh_token: 'ref', expires_at: Date.now() / 1000 + 21600, scope: 'activity:write read' });
   }
-  if (url === `${STRAVA.apiBase}/athlete`) return Response.json({ firstname: 'Ada', lastname: 'Rider' });
-  if (url === `${STRAVA.apiBase}/uploads`) {
+  if (url === `${STRAVA.relayApi}/athlete`) return Response.json({ firstname: 'Ada', lastname: 'Rider' });
+  if (url === `${STRAVA.relayApi}/uploads`) {
     if (init.body instanceof FormData) uploadForms.push(init.body);
     return uploadReply();
   }
-  if (url === STRAVA.deauthorizeUrl) return Response.json({});
+  if (url === `${STRAVA.relayApi}/deauthorize`) return Response.json({});
   throw new TypeError(`unexpected request ${url}`);
 }) as typeof fetch;
 
@@ -59,7 +59,7 @@ function approveInPopup(scope = 'read,activity:write') {
   channel.close();
 }
 
-const uploadsPosted = () => requests.filter((r) => r.url === `${STRAVA.apiBase}/uploads`).length;
+const uploadsPosted = () => requests.filter((r) => r.url === `${STRAVA.relayApi}/uploads`).length;
 const panel = () => doc.querySelector('#strava-panel')!;
 const panelButton = (text: string) =>
   Array.from(panel().querySelectorAll('button')).find((b) => b.textContent === text);
@@ -191,13 +191,26 @@ suite('a failed upload can be retried', () => {
   check('the failed attempt did reach Strava', uploadsPosted() === 3, String(uploadsPosted()));
 });
 
+// The relay is up but cannot reach Strava.
+uploadReply = () => new Response('strava unreachable', { status: 502 });
+summaryStrava()!.click();
+const downBack = await until(() => toasts().some((t) => t.includes('Strava could not be reached')));
+
+suite('a Strava the relay cannot reach', () => {
+  check('is reported as such', downBack
+    && toasts().some((t) => t === 'Upload to Strava failed: Strava could not be reached. Try again later.'), toasts().join(' | '));
+  check('the button is back to press again', summaryStrava()?.textContent === 'Upload to Strava');
+  check('the rider stays connected', strava.status === 'connected');
+  check('the attempt went to the relay', uploadsPosted() === 4, String(uploadsPosted()));
+});
+
 panelButton('Disconnect')!.click();
 const disconnected = await until(() => Boolean(panelButton('Connect to Strava')));
 settings.patch({ stravaAutoUpload: true });
 uploadReply = () => Response.json({ id: 3, activity_id: 7 });
 showSummary(finishedRide(new Date('2026-10-25T10:00:00')));
 await wait(30);
-const noAutoPopup = popups.length === 1 && uploadsPosted() === 3;
+const noAutoPopup = popups.length === 1 && uploadsPosted() === 4;
 summaryStrava()!.click();
 await wait();
 const popupFromClick = popups.length === 2;
@@ -205,11 +218,11 @@ approveInPopup();
 const uploadedAfterConnect = await until(() => summaryStrava()?.textContent === 'View on Strava');
 
 suite('uploading while disconnected', () => {
-  check('Disconnect revokes the app on Strava', requests.some((r) => r.url === STRAVA.deauthorizeUrl));
+  check('Disconnect revokes the app on Strava, through the relay', requests.some((r) => r.url === `${STRAVA.relayApi}/deauthorize`));
   check('and the panel offers Connect again', disconnected);
   check('auto-upload never opens a pop-up by itself', noAutoPopup);
   check('pressing Upload connects first', popupFromClick);
-  check('then uploads', uploadedAfterConnect && uploadsPosted() === 4, String(uploadsPosted()));
+  check('then uploads', uploadedAfterConnect && uploadsPosted() === 5, String(uploadsPosted()));
 });
 
 panelButton('Disconnect')!.click();
@@ -223,7 +236,7 @@ const refusedScope = await until(() => toasts().some((t) => t.includes('Upload p
 suite('unticking upload permission on Strava', () => {
   check('is explained', refusedScope, toasts().join(' | '));
   check('leaves it disconnected', strava.status === 'disconnected');
-  check('and uploads nothing', uploadsPosted() === 4, String(uploadsPosted()));
+  check('and uploads nothing', uploadsPosted() === 5, String(uploadsPosted()));
   check('the button is still there to try again', summaryStrava()?.textContent === 'Upload to Strava');
 });
 
@@ -327,5 +340,15 @@ suite('the activity type Strava receives', () => {
   check('with no trainer flag', unloadedRouteForm?.get('trainer') === null, String(unloadedRouteForm?.get('trainer')));
 });
 settings.patch({ stravaAutoUpload: false });
+
+// Strava may be blocked where the rider is: only the approval page may need it.
+suite('nothing but the approval pop-up goes to strava.com', () => {
+  const onStrava = requests.filter((r) => new URL(r.url).hostname.endsWith('strava.com'));
+  check('across connecting, the button, auto-upload and Disconnect, no request went to strava.com',
+    onStrava.length === 0, onStrava.map((r) => r.url).join(' '));
+  check('every request went to the relay', requests.every((r) => r.url.startsWith(STRAVA.relayUrl)));
+  check('each connect opened Strava\'s own approval page',
+    popups.length > 1 && popups.every((u) => u.startsWith(STRAVA.authorizeUrl)), String(popups.length));
+});
 
 report();

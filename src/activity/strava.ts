@@ -3,24 +3,29 @@ import { Emitter } from '../core/pubsub';
 /**
  * Strava connection and upload.
  *
- * Strava needs the app's client secret to swap an authorization code for
- * tokens and for every refresh, so those two calls go through the relay in
- * `relay/`. Everything else — the approval page, uploads, polling,
- * deauthorizing — goes straight to Strava from the browser.
+ * Only Strava's approval page is opened on strava.com. Every call after that
+ * goes to the relay in `relay/`: the token exchange and refresh, which need
+ * the app's client secret, and the upload, its polling, the athlete and
+ * deauthorizing, which the relay forwards with the rider's own token. A rider
+ * whose browser cannot reach strava.com (blocked in some countries) then
+ * needs it only to connect.
  *
  * The rider approves once per browser. The refresh token kept here then mints
  * a new 6-hour access token whenever one is needed, so the connection lasts
  * until the rider disconnects, revokes the app on Strava, or clears site data.
  */
 
+const RELAY_URL = 'https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev';
+
 export const STRAVA = {
   /** public; the secret lives only in the relay */
   clientId: '290716',
-  relayUrl: 'https://cycle-indoors-strava-relay.elek34ka-cycle-indoors.workers.dev',
+  /** the token exchange and refresh */
+  relayUrl: RELAY_URL,
+  /** opened in the pop-up: the one Strava page the browser itself loads */
   authorizeUrl: 'https://www.strava.com/oauth/authorize',
-  deauthorizeUrl: 'https://www.strava.com/oauth/deauthorize',
-  /** moves to https://api-v3.strava.com from 2027-01-04 */
-  apiBase: 'https://www.strava.com/api/v3',
+  /** the relay's forwarded Strava calls: `/uploads`, `/uploads/:id`, `/athlete`, `/deauthorize` */
+  relayApi: `${RELAY_URL}/strava`,
   scope: 'activity:write',
 };
 
@@ -34,6 +39,10 @@ const EXPIRY_MARGIN_S = 120;
 /** how long a pending approval is waited for before giving up */
 export const CONNECT_TIMEOUT_MS = 10 * 60_000;
 const POLL_INTERVAL_MS = 2000;
+/** the browser could not reach the relay */
+const UNREACHABLE = 'Could not reach the upload service. Check the connection and try again.';
+/** the relay could not reach Strava */
+const STRAVA_DOWN = 'Strava could not be reached. Try again later.';
 const POLL_ATTEMPTS = 30;
 
 export type StravaStatus = 'disconnected' | 'connecting' | 'connected';
@@ -217,7 +226,7 @@ export class StravaClient extends Emitter<{ status: StravaStatus }> {
     this.forget();
     if (!token) return;
     try {
-      await this.deps.fetch(STRAVA.deauthorizeUrl, {
+      await this.deps.fetch(`${STRAVA.relayApi}/deauthorize`, {
         method: 'POST',
         body: new URLSearchParams({ access_token: token }),
       });
@@ -273,7 +282,7 @@ export class StravaClient extends Emitter<{ status: StravaStatus }> {
     });
   }
 
-  /** The relay call: an authorization code or a refresh token in, tokens out. */
+  /** The relay's token call: an authorization code or a refresh token in, tokens out. */
   private async exchange(body: { code: string } | { refresh_token: string }): Promise<StoredTokens> {
     let res: Response;
     try {
@@ -283,8 +292,9 @@ export class StravaClient extends Emitter<{ status: StravaStatus }> {
         body: JSON.stringify(body),
       });
     } catch {
-      throw new Error('Could not reach Strava. Check the connection and try again.');
+      throw new Error(UNREACHABLE);
     }
+    if (res.status === 502) throw new Error(STRAVA_DOWN);
     if (!res.ok) {
       // A refresh token Strava no longer accepts means the app was revoked.
       if ('refresh_token' in body && (res.status === 400 || res.status === 401)) {
@@ -300,13 +310,15 @@ export class StravaClient extends Emitter<{ status: StravaStatus }> {
   private async api<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
     let res: Response;
     try {
-      res = await this.deps.fetch(`${STRAVA.apiBase}${path}`, {
+      res = await this.deps.fetch(`${STRAVA.relayApi}${path}`, {
         ...init,
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch {
-      throw new Error('Could not reach Strava. Check the connection and try again.');
+      throw new Error(UNREACHABLE);
     }
+    // The relay's own answer; Strava's statuses come through it unchanged.
+    if (res.status === 502) throw new Error(STRAVA_DOWN);
     if (res.status === 401) {
       this.forget();
       throw new StravaNotConnected('Strava no longer accepts this connection. Connect again.');

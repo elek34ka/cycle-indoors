@@ -210,11 +210,17 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   the suite; only `scripts/catalog/main.ts` touches the disk and Wrangler.
   `summary.ts` is meant for the browser too (My library), so a file reads the
   same wherever it is listed.
-- `relay/` — the Strava token relay (Cloudflare Worker), already deployed and
+- `relay/` — the Strava relay (Cloudflare Worker), already deployed and
   verified with a real authorization code; `src/activity/strava.ts` is its
   only caller. Strava requires `client_secret` for
   the code exchange *and* every refresh (access tokens last 6 h, refresh tokens
-  rotate) and has no PKCE, so this is not optional. It only ever handles
-  tokens; the browser uploads to Strava directly. Never put the secret
+  rotate) and has no PKCE, so this is not optional. It also forwards a fixed
+  set of Strava API calls (upload, upload status, athlete, deauthorize) with
+  the rider's own bearer, because Strava is blocked in some countries while
+  Cloudflare is not: once connected, the browser never calls `strava.com`, so
+  only Connect needs a VPN there. Forwarded, never stored or logged; the relay
+  stays stateless and tokens stay in the browser. Add a route to the fixed
+  list rather than proxying a path pattern. Never put the secret
   anywhere but `wrangler secret put` or the gitignored `relay/.dev.vars`.
-  Strava's API base moves to `https://api-v3.strava.com` from 2027-01-04.
+  Strava's API base moves to `https://api-v3.strava.com` from 2027-01-04;
+  that is `STRAVA_API_BASE` in the relay, not an app change.
