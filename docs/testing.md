@@ -130,7 +130,9 @@
   on the block's colour rather than at the height of its high end, where it
   used to be invisible. The ride screen's time axis (the workout, overrun in
   five-minute steps, a free ride's last ten minutes) and the summary's
-  whole-ride axis are pure functions, checked for each case.
+  whole-ride axis are pure functions, checked for each case. A 77 % block is
+  filled in Z3's colour by the formula and Z2's once the rider's Z2 ends at
+  78 %.
 - **hr-zones** — the five heart-rate zones: labels, the bound landing in the
   zone below (111 of 185 is Z1, 112 is Z2), and the trace colour unchanged for
   every bpm from 100 to 200. Time in zones counts only seconds with a
@@ -145,7 +147,10 @@
   zone charts are checked, including "No heart rate recorded". A hover at
   12:30 reads out that block and second. Save graph image and Save stats image
   download PNGs named after the `.fit`; a browser that returns no image gets a
-  toast and leaves Download .fit and Upload to Strava working.
+  toast and leaves Download .fit and Upload to Strava working. With the
+  rider's own zones (Z2 to 78 % of a 200 W FTP, HR Z2 to 78.4 % of 185) the
+  charts put 154 W and 140 bpm in Z2, a workout's own FTP of 300 W puts 230 W
+  in Z2, and the stats image paints the same zone times as the charts.
 - **summary-image** — the two images' layouts: 1600 × 900, or 1600 × 1240 with
   the profile under the graph, whatever the window's width. The stats card
   holds every summary value with its unit or note, both zone charts, the
@@ -157,6 +162,25 @@
   is never called "Free ride"), the summary's own strings for every number,
   no line for heart rate, climb or on-target when the ride has none, only
   the zones with time in them, and the credit last after a blank line.
+- **training-zones** — the rider's zones. The standard sets equal the old
+  fixed tables field by field; with Z2 ending at 78 %, 77 % and 78 % are Z2
+  and 78.1 % is Z3. Bounds out of order, equal, out of range (power 10–300 %,
+  heart rate 30–100 %), NaN, the wrong length or the wrong type are refused.
+  Edited percentages are stored rounded to 0.1 % (78.4 is exactly 0.784) and
+  as the formula (null) when they equal it, and corrupt saved bounds load as
+  the formula without a throw. Time in zones follows the rider's zones for
+  power, heart rate and a workout's own FTP. The editor's rows read FTP 200
+  as 0–110 … 240–300, above 300 W, and 78.4 % of 185 as 145 bpm. Then the
+  Settings view in jsdom: the page has only a Formula/Custom line and an Edit
+  button per set. Each button opens one pop-up, which Done, Escape and the
+  backdrop close (a click in the card does not), and a closed pop-up stops
+  listening to settings. Through the pop-ups, Z2 set to 78 moves Z2 and Z3
+  to 156 W. 92 % under a
+  90 % Z3, 104 % of max HR, an empty field, and a value that rounds onto its
+  neighbour are each refused with a toast, and the field is put back. A new
+  FTP in its own field moves the watts and keeps the %. Reset to formula
+  resets one table only, a bound edited back to the formula counts as the
+  formula, and Reset to defaults resets both.
 - **workout-navigation** — the workout clock only moves forward: `+30s` and
   next block advance it, a backward seek is refused, `+30s` at 59:50 of an
   hour stops on 60:00, and once the workout has run out neither control moves
@@ -216,7 +240,9 @@
   upload or a duplicate, and storage that is refused never blocks the
   summary. Both upload paths send the same description, naming the route the
   summary opened on even when another is loaded before the click. Exactly one
-  file goes to Strava, the `.fit`; the images never do.
+  file goes to Strava, the `.fit`; the images never do. With the rider's Z2
+  ending at 78 %, 20 minutes at 154 W of a 200 W FTP is described as
+  `Power zones: Z2 20:00`.
 - **catalog-index** — the index check: a newer major version is refused as
   "needs a newer version of the app", minor versions pass, and damaged
   indexes (no version, a route without a file, an id of the wrong kind) are
@@ -277,7 +303,10 @@
 - **library-view** — the Library booted in the real app with a stand-in
   catalog:
   - nothing fetched at boot, and Browse library opening Workouts;
-  - six built-in and two catalog workouts labelled by source;
+  - six built-in and the catalog's workouts labelled by source;
+  - a 77 % block kept in Z3's colour in the list, the detail profile and the
+    block list while the rider's Z2 ends at 78 %, because the Library keeps
+    the standard zones;
   - a description containing markup shown as text with its line breaks;
   - blocks in watts at the current FTP;
   - search, the empty state and Clear filters, and filters restored in a new
@@ -343,7 +372,8 @@
   new one fails until it is), a profile holding references and never bytes,
   tokens or the key, reading back loose or foreign data safely, settings
   from an older backup getting defaults, and applying one replacing the
-  database while device settings stay.
+  database while device settings stay. Custom zones travel with a backup; an
+  older backup without them, or one with broken bounds, gives the formula.
 - **backup-vault-client** — the vault client against a stand-in fetch: one
   endpoint, a bearer token and nothing else in the request, no backup as
   undefined, and every failure mapped to a reason a rider can read.
@@ -405,5 +435,8 @@
   `+30s` and `▶|`; arrow keys, graph clicks and block-list clicks do not move
   the clock), loads the sample route and checks the climb
   tile, mini map and route-following gradient, rides to the end, and verifies
-  the summary and its FIT export. It also fails if anything reaches
-  `console.error`.
+  the summary and its FIT export. The ride screen's zone colours follow the
+  rider's zones: with Z2 to 78 % a 77 % block turns Z2 in the block list in
+  place, and so do the Target and Power stripes. 144 bpm of 185 is HR Z2 with
+  Z2 to 78.4 %, and a workout's own FTP of 300 W makes 230 W Z2 and 240 W Z3.
+  It also fails if anything reaches `console.error`.

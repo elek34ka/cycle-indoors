@@ -329,4 +329,56 @@ suite('a browser that will not make the image', () => {
     doc.querySelector('#summary-overlay .strava-slot')?.textContent === 'Upload to Strava');
 });
 
+
+// The rider's own zones, from Settings.
+const Z2_78 = [0.55, 0.78, 0.90, 1.05, 1.20, 1.50];
+const before = { ftp: settings.current.ftp, hrMax: settings.current.hrMax };
+settings.patch({ ftp: 200, hrMax: 185, powerZoneBounds: Z2_78, hrZoneBounds: [0.60, 0.784, 0.80, 0.90] });
+const at = (rideSamples: Sample[], power: number, hr: number) => rideSamples.map((s) => ({ ...s, power, heartRate: hr }));
+courseStore.unload();
+showSummary(snapshot(at(samples(1200), 154, 140)));
+const customCharts = zoneCharts();
+// The stats image's text, as painted.
+const painted: string[] = [];
+{
+  const realGetContext = proto.getContext;
+  proto.getContext = function recording(this: HTMLCanvasElement, ...args: unknown[]) {
+    const ctx = (realGetContext as (...a: unknown[]) => Record<string, unknown>).apply(this, args);
+    ctx.fillText = (text: string) => { painted.push(text); };
+    return ctx;
+  } as never;
+  button('Save stats image')!.click();
+  await settle();
+  proto.getContext = realGetContext;
+  downloads.splice(0);
+}
+/** "Z2 Endurance 20:00" for each zone row painted under `title`. */
+const paintedRows = (title: string, count: number) => {
+  const from = painted.indexOf(title) + 1;
+  return Array.from({ length: count }, (_, k) => `${painted[from + 2 * k]} ${painted[from + 2 * k + 1]}`);
+};
+const override = { name: 'Own FTP', duration: 600, segments: [], textEvents: [], source: 'zwo', ftpOverride: 300 } as unknown as Workout;
+showSummary(snapshot(at(samples(600), 230, 140), { workout: override }));
+const overrideCharts = zoneCharts();
+settings.patch({ powerZoneBounds: null, hrZoneBounds: null });
+showSummary(snapshot(at(samples(1200), 154, 140)));
+const formulaCharts = zoneCharts();
+settings.patch(before);
+
+suite('the zone charts use the rider\'s zones', () => {
+  const [power, hr] = customCharts;
+  check('FTP 200, Z2 to 78 %, 20 min at 154 W: power Z2 20:00', power.rows.includes('Z2 Endurance 20:00'), JSON.stringify(power.rows));
+  check('and nothing in Z3', power.rows.includes('Z3 Tempo 0:00'));
+  check('max HR 185, HR Z2 to 78.4 %, 140 bpm: HR Z2 20:00', hr.rows.includes('Z2 Endurance 20:00'), JSON.stringify(hr.rows));
+  check('and nothing in HR Z3', hr.rows.includes('Z3 Tempo 0:00'));
+  check('the stats image paints the same power zones as the chart',
+    paintedRows('Power zones', 7).join() === power.rows.join(), JSON.stringify(paintedRows('Power zones', 7)));
+  check('and the same heart-rate zones', paintedRows('Heart-rate zones', 5).join() === hr.rows.join(),
+    JSON.stringify(paintedRows('Heart-rate zones', 5)));
+  check('a workout with its own FTP of 300: 230 W is Z2', overrideCharts[0].rows.includes('Z2 Endurance 10:00'),
+    JSON.stringify(overrideCharts[0].rows));
+  check('back on the formula, the same ride is Z3', formulaCharts[0].rows.includes('Z3 Tempo 20:00')
+    && formulaCharts[1].rows.includes('Z3 Tempo 20:00'), JSON.stringify(formulaCharts.map((c) => c.rows)));
+});
+
 report();

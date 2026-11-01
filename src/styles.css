@@ -735,6 +735,46 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .sim-disclosure .hint { margin: 0 0 8px; }
 
 .toggle-list { display: grid; gap: 10px; }
+
+/* training zones */
+.zone-editor { display: grid; gap: 12px; }
+.zone-editor h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.zone-editor .hint { color: var(--text-faint); font-size: 14px; margin: -4px 0 0; }
+.zone-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.zone-line-title { font-size: 15px; font-weight: 600; min-width: 130px; }
+.zone-line .zone-edit { margin-left: auto; }
+.zone-dialog { z-index: 45; }
+.zone-card { width: min(620px, 100%); gap: 14px; margin-block: auto; }
+.zone-card .hint { color: var(--text-faint); font-size: 14px; margin: -6px 0 0; }
+.zone-table-head { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+.zone-table-head h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.zone-tag {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--text-faint);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.zone-tag.custom { color: var(--accent); border-color: var(--accent-dim); }
+.zone-table-head .zone-reset { margin-left: auto; }
+.zone-rows { display: grid; gap: 6px; }
+.zone-edit-row {
+  display: grid;
+  grid-template-columns: 10px minmax(130px, 1fr) 84px minmax(0, 1.3fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.zone-swatch { width: 10px; height: 22px; border-radius: 3px; }
+.zone-open { color: var(--text-faint); text-align: center; }
+.zone-range { font-family: var(--mono); font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+@media (max-width: 520px) {
+  .zone-edit-row { grid-template-columns: 10px 1fr 84px; }
+  .zone-range { grid-column: 2 / -1; white-space: normal; }
+}
 .toggle-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

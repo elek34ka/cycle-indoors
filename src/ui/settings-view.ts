@@ -1,5 +1,6 @@
 import { settings, type Settings } from '../core/settings';
 import { el, qs, toast } from './dom';
+import { buildZoneEditor } from './zone-editor';
 
 interface ToggleSpec { key: keyof Settings; label: string; hint: string; }
 
@@ -73,6 +74,7 @@ export function buildSettingsView(): void {
     ]));
   }
   host.append(grid);
+  host.append(buildZoneEditor());
 
   const toggles = el('div', { class: 'toggle-list' });
   for (const toggle of TOGGLES) {
@@ -98,7 +100,8 @@ export function buildSettingsView(): void {
       on: {
         click: () => {
           settings.reset();
-          const numbers = Array.from(host.querySelectorAll<HTMLInputElement>('input[type="number"]'));
+          // the profile fields only: the zone editor refreshes itself on the change
+          const numbers = Array.from(grid.querySelectorAll<HTMLInputElement>('input[type="number"]'));
           numbers.forEach((input, i) => {
             const field = FIELDS[i];
             if (field) input.value = String(settings.current[field.key]);

@@ -12,7 +12,7 @@ type Settings = import('../src/core/settings').Settings;
 // it is put on a side on purpose.
 const PERSONAL = [
   'ftp', 'hrMax', 'riderWeight', 'bikeWeight', 'wheelCircumference', 'smoothPowerSeconds',
-  'showMiniMap', 'miniMapFollow', 'showSidebar', 'routeSmoothing',
+  'showMiniMap', 'miniMapFollow', 'showSidebar', 'routeSmoothing', 'powerZoneBounds', 'hrZoneBounds',
 ];
 const DEVICE = ['miniMapPosition', 'useMockDevices', 'autoConnectBle', 'debugMode', 'librarySection', 'libraryFilters', 'stravaAutoUpload'];
 const defaults = settings.current as Settings;
@@ -34,7 +34,10 @@ await store.setDone('catalog:workout:a', true);
 await store.follow('plan:Gravel');
 await store.logRide({ startedAt: 5, duration: 3600, distance: 30_000, avgPower: 200, normalisedPower: 210, tss: 60, ascent: 0 });
 
-const mine = { ...defaults, ftp: 280, riderWeight: 70, debugMode: true, miniMapPosition: { left: 5, top: 6 } } as Settings;
+const MY_POWER = [0.55, 0.78, 0.90, 1.05, 1.20, 1.50];
+const mine = {
+  ...defaults, ftp: 280, riderWeight: 70, debugMode: true, miniMapPosition: { left: 5, top: 6 }, powerZoneBounds: MY_POWER,
+} as Settings;
 const profile = await buildProfile(personal, mine, 1234);
 const json = JSON.stringify(profile);
 const keyText = formatKey(generateKey());
@@ -43,6 +46,7 @@ suite('building a profile', () => {
   check('holds marks, plan, library, rides and personal settings',
     profile.done.length === 1 && profile.followed === 'plan:Gravel' && profile.library.length === 1
       && profile.rides.length === 1 && profile.settings.ftp === 280 && profile.madeAt === 1234);
+  check('carries the rider\'s zones', profile.settings.powerZoneBounds?.join() === MY_POWER.join() && profile.settings.hrZoneBounds === null);
   check('no file bytes', !('bytes' in profile.library[0]) && !json.includes('AAAAAAAA'));
   check('a 2 MB file contributes well under 1 KB', json.length < 1024, `${json.length} bytes`);
   check('no device settings', !('debugMode' in profile.settings) && !('miniMapPosition' in profile.settings));
@@ -71,6 +75,14 @@ suite('settings from a backup', () => {
   check('an older backup gets defaults for what it lacks', fromOld.ftp === 300 && fromOld.riderWeight === defaults.riderWeight
     && fromOld.hrMax === defaults.hrMax);
   check('unknown fields are dropped', !('futureSetting' in fromOld));
+  check('custom zones come from the backup', fromLaptop.powerZoneBounds?.join() === MY_POWER.join() && fromLaptop.hrZoneBounds === null);
+  check('a backup made before zones could be edited gives the formula',
+    fromOld.powerZoneBounds === null && fromOld.hrZoneBounds === null);
+  const customTablet = { ...tablet, powerZoneBounds: MY_POWER } as Settings;
+  check("and replaces this device's custom zones, as a restore replaces everything personal",
+    settingsFromBackup(customTablet, { ftp: 300 } as Partial<Settings>).powerZoneBounds === null);
+  const broken = settingsFromBackup(tablet, { ...profile.settings, powerZoneBounds: [0.9, 0.5, 1, 1.1, 1.2, 1.5], hrZoneBounds: [0.6] } as Partial<Settings>);
+  check('invalid zones in a backup give the formula', broken.powerZoneBounds === null && broken.hrZoneBounds === null);
 });
 
 // Applying replaces the database, then the settings.
@@ -91,6 +103,7 @@ suite('applying a profile', () => {
   check('this device\'s own file is gone', ownGone);
   check('settings: personal from the backup, device kept', patched.ftp === 280 && patched.debugMode === false
     && patched.miniMapPosition?.left === 99);
+  check('zones are applied', patched.powerZoneBounds?.join() === MY_POWER.join());
 });
 
 report();

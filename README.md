@@ -39,6 +39,14 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   going in a background tab.
 - **Shortcuts**: Space (start/pause), ↑/↓ (bias), `L` (lap), `M` (map),
   `W` (workout panel).
+- **Your own training zones** (Settings → Edit power zones / Edit heart-rate
+  zones, each a pop-up): 7 power zones and 5 heart-rate zones. Each one shows
+  its range in % of FTP or max HR and in watts or bpm. They start as the standard formula (power 55/75/90/105/120/150 %
+  of FTP, heart rate 60/70/80/90 % of max HR). Set any zone's upper bound in %
+  and the next zone starts there. Bounds are kept as %, so a new FTP moves the
+  watts with it. Reset to formula undoes your edits for one table. The ride
+  screen, the summary and the Strava description use your zones; the Library
+  keeps the standard ones.
 
 ### Trainer and sensors
 
@@ -81,8 +89,8 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
 - **Summary**: power, NP, IF, TSS, heart rate, climb and how closely you held
   the target. The whole ride is drawn on the workout graph, with your power and
   heart rate over the blocks, and a route ride gets its elevation profile
-  underneath. Separate charts show time in power zones and heart-rate zones
-  (from max HR in Settings).
+  underneath. Separate charts show time in your power zones and heart-rate
+  zones, as set in Settings.
 - **Images**: Save graph image and Save stats image write PNGs of the graph
   and of every number, for sharing. Strava does not accept images from apps,
   so to put them on the activity you add them on Strava yourself.
@@ -90,7 +98,8 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   map.
 - **Strava upload**, by button or automatically on finish, once connected in
   Settings. The activity's description names the route and the workout, then
-  lists the summary's numbers and time in zones.
+  lists the summary's numbers and time in your zones. Strava's own zone
+  charts on the activity use the zones in your Strava account, not these.
 - **My rides**: a log of every finished ride's numbers. **Ride same session**
   loads the same workout and route again.
 
@@ -98,7 +107,7 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
 
 Settings → Backup stores your profile, encrypted, so you can move it to
 another browser. The profile is your done marks, followed plan, personal
-settings, ride log and My library references. It is locked with a recovery
+settings (training zones included), ride log and My library references. It is locked with a recovery
 key that only you hold. **Lose the key and the backup is gone.** Restoring
 **replaces** the profile on that device; it does not merge.
 

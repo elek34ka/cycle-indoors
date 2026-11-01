@@ -1,5 +1,5 @@
 import { hhmmss } from '../core/format';
-import { zoneForRatio } from '../core/zones';
+import { riderZones, zoneForRatio, type Zone } from '../core/zones';
 import { settings } from '../core/settings';
 import { peakRatio, targetRatioAt, type Segment, type Workout } from '../workout/types';
 import { wattsText } from '../workout/targets';
@@ -67,6 +67,8 @@ export interface GraphView {
   elapsed: number;
   ftp: number;
   hrMax: number;
+  /** the zones the blocks are coloured by, as fractions of `ftp`: the rider's own */
+  powerZones: readonly Zone[];
   /** trailing-average window for the traces, in seconds */
   smoothWindow: number;
   domain: Domain;
@@ -322,7 +324,7 @@ function drawSegment(
 
   const a = seg.powerStart;
   const b = seg.powerEnd ?? seg.powerStart;
-  const zone = zoneForRatio((a + b) / 2);
+  const zone = zoneForRatio((a + b) / 2, view.powerZones);
   const yA = yOf(a);
   const yB = yOf(b);
 
@@ -551,6 +553,7 @@ export class ProfileGraph {
       elapsed: snapshot.elapsed,
       ftp: snapshot.workout?.ftpOverride ?? settings.current.ftp,
       hrMax: settings.current.hrMax,
+      powerZones: riderZones(settings.current).power,
       smoothWindow: settings.current.smoothPowerSeconds,
       domain: whole
         ? wholeRideDomain(this.workout, Math.max(snapshot.elapsed, lastT))

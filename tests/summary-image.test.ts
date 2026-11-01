@@ -8,6 +8,7 @@ const {
 } = await import('../src/ui/summary-image');
 const { summaryValues, subText } = await import('../src/ui/summary-values');
 const { computeMetrics } = await import('../src/session/metrics');
+const { POWER_ZONES } = await import('../src/core/zones');
 const { Course } = await import('../src/activity/course');
 const { parseGpx } = await import('../src/activity/gpx');
 type Sample = import('../src/session/metrics').Sample;
@@ -37,7 +38,7 @@ function drawnText<T>(fn: () => T): { texts: string[]; result: T } {
 
 const graphInput = (samples: Sample[], withProfile: boolean) => ({
   header,
-  graph: { workout: undefined, samples, elapsed: samples.length, ftp: 250, hrMax: 185, smoothWindow: 3 },
+  graph: { workout: undefined, samples, elapsed: samples.length, ftp: 250, hrMax: 185, powerZones: POWER_ZONES, smoothWindow: 3 },
   ...(withProfile ? { profile: { course, ridden: 5000, header: 'Hilly loop · 5.00 km · ↑ 60 m' } } : {}),
 });
 

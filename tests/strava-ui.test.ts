@@ -267,6 +267,28 @@ suite('the description Strava receives', () => {
   check('no other part of the form is a file', [...(clickedForm?.entries() ?? [])]
     .filter(([, value]) => typeof value !== 'string').length === 1);
 });
+
+// The rider's own zones reach the description: 20 minutes at 154 W of a 200 W
+// FTP is Z2 once Z2 ends at 78 %, Z3 by the formula.
+const zoneSettings = { ftp: settings.current.ftp, powerZoneBounds: settings.current.powerZoneBounds };
+settings.patch({ ftp: 200, powerZoneBounds: [0.55, 0.78, 0.90, 1.05, 1.20, 1.50] });
+uploadReply = () => Response.json({ id: 7, activity_id: 77 });
+{
+  const ride = finishedRide(new Date('2026-10-25T14:00:00'));
+  showSummary({
+    ...ride,
+    samples: Array.from({ length: 1200 }, (_, t) => ({ t, power: 154, targetPower: 0, heartRate: 140, cadence: 90, speed: 30, distance: t * 8.3 })),
+  } as unknown as SessionSnapshot);
+}
+await until(() => summaryStrava()?.textContent === 'View on Strava');
+const zonedForm = uploadForms.at(-1);
+settings.patch(zoneSettings);
+
+suite('the description\'s zones are the rider\'s', () => {
+  const lines = String(zonedForm?.get('description') ?? '').split('\n');
+  const power = lines.find((l) => l.startsWith('Power zones: '));
+  check('the power zone line reads Z2 20:00', power === 'Power zones: Z2 20:00', String(power));
+});
 settings.patch({ stravaAutoUpload: false });
 
 report();
