@@ -4,6 +4,7 @@ import type { Passes } from '../passes';
 import type { Land } from '../landscape';
 import type { Piece } from '../chunks';
 import type { Vec3 } from '../pose';
+import type { Season } from '../palette';
 
 /**
  * What the window hands the renderer, and what the renderer offers back. This
@@ -41,6 +42,8 @@ export interface SceneRenderer {
   setResolution(width: number): void;
   /** heights are drawn as (h − base) × exaggeration; changing it drops every piece */
   setExaggeration(exaggeration: number): void;
+  /** colours and bare trees for the season (it opens in summer); changing it drops every piece, and nothing moves */
+  setSeason(season: Season): void;
   build(piece: Piece): void;
   drop(piece: Piece): void;
   /** drops every piece */

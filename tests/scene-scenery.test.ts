@@ -10,8 +10,7 @@ const { buildGround } = await import('../src/scene/ground');
 const { placeScenery, placeSlice, inLane, TREE_CLEARANCE, POST_CLEARANCE, WATER_CLEARANCE, TREE_KINDS, SCENERY_KINDS } = await import('../src/scene/scenery');
 const { buildLand } = await import('../src/scene/landscape');
 const { readFileSync } = await import('node:fs');
-const { ChunkPlanner } = await import('../src/scene/chunks');
-const { buildRoadChunk } = await import('../src/scene/mesh/road-mesh');
+const { baseError, bruteDistance } = await import('./scene-footing');
 const { check, report, suite } = await import('./harness');
 const { trackFromLocal, outAndBack, hairpin, switchback, eastbound } = await import('./scene-fixtures');
 import type { LocalPoint } from './scene-fixtures';
@@ -25,70 +24,6 @@ function build(points: LocalPoint[] | ActivityTrack) {
   const ground = buildGround(p, seed, g);
   const land = buildLand(g, p, seed);
   return { g, p, ground, land, seed, items: placeScenery(g, p, ground, land, seed, 0, g.count) };
-}
-
-/**
- * The topmost drawn surface at each item, read from what is drawn: the
- * ground lattice's triangles (drawnHeightAt, which the terrain-mesh suite
- * matches to the tile arrays) and every road and verge triangle in the road
- * chunks' arrays. Returns the worst |base − surface|, metres.
- */
-function baseError(b: ReturnType<typeof build>) {
-  const { g, p, ground, land, seed, items } = b;
-  const planner = new ChunkPlanner(g, p);
-  const model = { g, p, ground, land, seed, chunkRange: (c: number) => planner.chunkRange(c) };
-  const tris: number[][] = [];
-  const grid = new Map<string, number[][]>();
-  const key = (x: number, z: number) => `${Math.floor(x / 20)},${Math.floor(z / 20)}`;
-  for (let c = 0; c < planner.chunkCount; c++) {
-    const chunk = buildRoadChunk(model, c, { x: 0, z: 0 }, 1);
-    for (const m of [...chunk.road, ...chunk.verge]) {
-      for (let t = 0; t < m.index.length; t += 3) {
-        const tri = [0, 1, 2].flatMap((e) => { const v = m.index[t + e] * 3; return [m.positions[v], m.positions[v + 1] + ground.base, m.positions[v + 2]]; });
-        tris.push(tri);
-        const x0 = Math.min(tri[0], tri[3], tri[6]), x1 = Math.max(tri[0], tri[3], tri[6]);
-        const z0 = Math.min(tri[2], tri[5], tri[8]), z1 = Math.max(tri[2], tri[5], tri[8]);
-        for (let gx = Math.floor(x0 / 20); gx <= Math.floor(x1 / 20); gx++) {
-          for (let gz = Math.floor(z0 / 20); gz <= Math.floor(z1 / 20); gz++) {
-            const k = `${gx},${gz}`;
-            const list = grid.get(k) ?? [];
-            list.push(tri);
-            grid.set(k, list);
-          }
-        }
-      }
-    }
-  }
-  let worst = 0;
-  for (const it of items) {
-    let top = ground.drawnHeightAt(it.x, it.z);
-    for (const t of grid.get(key(it.x, it.z)) ?? []) {
-      const [ax, ah, az, bx, bh, bz, cx, ch, cz] = t;
-      const det = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
-      if (Math.abs(det) < 1e-9) continue;
-      const l1 = ((bz - cz) * (it.x - cx) + (cx - bx) * (it.z - cz)) / det;
-      const l2 = ((cz - az) * (it.x - cx) + (ax - cx) * (it.z - cz)) / det;
-      const l3 = 1 - l1 - l2;
-      if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue;
-      top = Math.max(top, l1 * ah + l2 * bh + l3 * ch);
-    }
-    worst = Math.max(worst, Math.abs(it.y - top));
-  }
-  return worst;
-}
-
-/** Distance from (x, z) to every segment of a line, by brute force
- *  (independent of the spatial hash the code under test uses). */
-function bruteDistance(g: { count: number; x: Float64Array; z: Float64Array }, x: number, z: number): number {
-  let best = Infinity;
-  for (let k = 0; k + 1 < g.count; k++) {
-    const dx = g.x[k + 1] - g.x[k];
-    const dz = g.z[k + 1] - g.z[k];
-    const len2 = dx * dx + dz * dz;
-    const t = len2 > 1e-9 ? Math.max(0, Math.min(1, ((x - g.x[k]) * dx + (z - g.z[k]) * dz) / len2)) : 0;
-    best = Math.min(best, Math.hypot(g.x[k] + dx * t - x, g.z[k] + dz * t - z));
-  }
-  return best;
 }
 
 const routes: [string, LocalPoint[] | ActivityTrack][] = [
@@ -118,7 +53,7 @@ for (const [name, pts] of routes) {
     check('no tree, bush or rock within 6 m of any pass', tooClose === 0, `${tooClose}, nearest ${worst.toFixed(2)} m`);
     check('no post within 4 m of any pass', postsTooClose === 0, `${postsTooClose}`);
     check('the posts are there', items.some((it) => it.kind === 'post'));
-    const err = baseError(built);
+    const err = baseError(built, items);
     check('every item stands on the drawn surface (ground, verge or road), within 1 mm', err <= 1e-3, `off by ${err.toFixed(4)} m`);
 
     const again = placeScenery(g, p, ground, land, seed, 0, g.count);

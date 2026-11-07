@@ -75,7 +75,7 @@ const SCENERY_REACH = 120;
 const isTall = (k: SceneryKind) => k !== 'post';
 
 /** Seeded random numbers in [0, 1). */
-function mulberry(seed: number): () => number {
+export function mulberry(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -85,7 +85,8 @@ function mulberry(seed: number): () => number {
   };
 }
 
-function sliceSeed(seed: number, i: number): number {
+/** a slice's own seed, from the route's */
+export function sliceSeed(seed: number, i: number): number {
   return Math.imul(seed ^ Math.imul(i + 1, 0x9e3779b1), 0x85ebca6b) >>> 0;
 }
 

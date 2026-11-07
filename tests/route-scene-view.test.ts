@@ -19,9 +19,12 @@ const { buildViewProfile } = await import('../src/scene/view-profile');
 const { buildPasses, drawnAt } = await import('../src/scene/passes');
 const { elevationPlot, xForDistance } = await import('../src/ui/elevation-graph');
 const { readFileSync } = await import('node:fs');
+const { placeScenery } = await import('../src/scene/scenery');
+const { placeDetails } = await import('../src/scene/details');
 const { trackFromLocal, eastbound } = await import('./scene-fixtures');
 import type { FrameView, RendererLoader, SceneModel, SceneRenderer } from '../src/scene/render/types';
 import type { Piece } from '../src/scene/chunks';
+import type { Season } from '../src/scene/palette';
 import type { ActivityTrack } from '../src/activity/types';
 
 /** A renderer that draws nothing and remembers what it was asked. */
@@ -32,6 +35,7 @@ class FakeRenderer implements SceneRenderer {
   readonly canvas = document.createElement('canvas');
   resolutions: number[] = [];
   exaggerations: number[] = [];
+  seasons: Season[] = [];
   built: Piece[] = [];
   frames: FrameView[] = [];
   lost: (() => void)[] = [];
@@ -39,6 +43,7 @@ class FakeRenderer implements SceneRenderer {
   constructor(readonly model: SceneModel, readonly exaggeration: number) { FakeRenderer.live++; FakeRenderer.created++; }
   setResolution(w: number) { this.resolutions.push(w); }
   setExaggeration(e: number) { this.exaggerations.push(e); }
+  setSeason(s: Season) { this.seasons.push(s); }
   build(piece: Piece) { this.built.push(piece); }
   drop() {}
   clear() {}
@@ -201,6 +206,42 @@ await suite('3D view: settings', async () => {
   // at 1× a height is drawn at its real size above the route's lowest point
   near('at 1× the rider is drawn at true height', f.rider[1], (drawnHeightAtStart() - lastFake!.model.ground.base), 1e-6);
   view.close();
+});
+
+await suite('3D view: seasons', async () => {
+  const view = open();
+  await ready();
+  const fake = lastFake!;
+  check('it opens in summer, and the renderer is told nothing', choice('season', 'summer').getAttribute('aria-pressed') === 'true' && fake.seasons.length === 0);
+  // what the renderer would place for the chunks it was given, from the model it was handed
+  const placed = () => {
+    const { g, p, ground, land, seed } = fake.model;
+    return JSON.stringify(fake.built.filter((b) => b.kind !== 'tile').map((b) => {
+      const [from, to] = fake.model.chunkRange((b as { index: number }).index);
+      return b.kind === 'chunk' ? placeScenery(g, p, ground, land, seed, from, to) : placeDetails(g, p, ground, land, seed, from, to);
+    }));
+  };
+  const model = fake.model;
+  const before = placed();
+  const builtBefore = fake.built.length;
+  choice('season', 'autumn').click();
+  check('Autumn calls setSeason once, with autumn', fake.seasons.join() === 'autumn' && choice('season', 'autumn').getAttribute('aria-pressed') === 'true');
+  check('the same renderer and model draw it: nothing is made again', lastFake === fake && fake.model === model);
+  const rebuilt = fake.built.slice(builtBefore);
+  check(`the pieces are built again at once, the road under the rider first (${rebuilt.length} so far)`, rebuilt.length > 0 && rebuilt[0].kind === 'chunk');
+  fake.built = fake.built.slice(0, builtBefore);
+  check('every tree, rock, post and detail of those pieces stands where it did', placed() === before);
+  choice('season', 'autumn').click();
+  check('choosing the season already shown does nothing', fake.seasons.length === 1);
+  for (const s of ['winter', 'spring', 'summer']) choice('season', s).click();
+  check('Winter, Spring and Summer call it once each', fake.seasons.join() === 'autumn,winter,spring,summer', fake.seasons.join());
+  view.close();
+  const again = open();
+  check('a new window opens in summer again: the choice is not remembered', choice('season', 'summer').getAttribute('aria-pressed') === 'true');
+  choice('season', 'winter').click();
+  await ready();
+  check('a season chosen while the renderer loads is handed to it once it is there', lastFake !== fake && lastFake!.seasons.join() === 'winter', lastFake!.seasons.join());
+  again.close();
 });
 
 function drawnHeightAtStart(): number {

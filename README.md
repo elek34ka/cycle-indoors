@@ -79,9 +79,14 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   climbs, bends and repeated roads drawn once. The land changes along the
   way, between fields, meadow, farmland, woods, forest, heath and rocky upland,
   chosen from the route's height and gradient, with ponds beside the road
-  where it runs nearly level, their water from about 20 m off it. It is all made up from the
-  route alone, so it will often be wrong for the real place, and nothing
-  about the route leaves the browser to build it.
+  where it runs nearly level, their water from about 20 m off it. Near the
+  rider, grass, flowers and stones dot the ground, and reeds edge the ponds.
+  A Season choice (Spring, Summer, Autumn, Winter) changes only colours
+  and which trees are bare: autumn leaves, winter snow with the road kept
+  clear, bare broadleaf trees and frozen ponds. Nothing moves, and it opens
+  in Summer every time. It is all made up from the route alone, so it will
+  often be wrong for the real place, and nothing about the route leaves the
+  browser to build it.
 
 ### Library
 
@@ -163,9 +168,10 @@ src/
                devices, route smoother, Library, Route 3D preview window
   scene/       Route 3D preview: route geometry, drawn heights, repeated
                passes, kinds of land and their colours, made-up ground,
-               ponds and scenery, mesh builders, the first-person view,
-               playback and chunking, all pure; render/ is the only code
-               that imports three.js, loaded on first use
+               ponds, scenery and ground details, mesh builders, the
+               first-person view, playback and chunking, all pure;
+               render/ is the only code that imports three.js, loaded
+               on first use
   catalog/     content catalog: index format, summaries, builder, sync, client
   library/     Library entries, search and filters, the IndexedDB store
   ride-log/    the ride log's entry for a finished ride

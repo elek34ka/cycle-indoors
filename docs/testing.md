@@ -160,7 +160,8 @@
   centre line as ridden, measured by brute force over every segment rather
   than through the spatial hash the code uses. Every item stands on the
   drawn surface within 1 mm, read back from what is drawn: the lattice's
-  triangles and every road and verge triangle in the chunk arrays. Placing twice, or in two
+  triangles and every road and verge triangle in the chunk arrays
+  (`tests/scene-footing.ts`, shared with scene-details). Placing twice, or in two
   chunks in either order, gives identical items; repeated slices place
   nothing; a rebuilt route grows the same scene and a different one does
   not. A flat road runs through open land or mixed woods and an 8% climb
@@ -175,6 +176,32 @@
   water. Nothing but posts stands in a pond's sight lane (the hull of its
   water and 60 m of its road either way), where the same road without
   ponds grows hundreds of items.
+- **scene-details** — grass, flowers, stones and reeds near the road.
+  - **Every fixture** (a hairpin, a switchback, an out-and-back with legs
+    1 m apart, the sample loop and a 30 km meadow road with ponds):
+    - no detail is within 4.5 m of any pass, by brute force over every
+      segment;
+    - no grass, flower or stone is more than 60 m from the road, measured
+      across its slice, with 0.5 m allowed on bends;
+    - every detail stands on the drawn surface within 1 mm, read back from
+      the arrays as scene-scenery does;
+    - placing twice, or in two chunks in either order, gives identical
+      details, and repeated slices place nothing.
+  - **Ponds** (the 30 km meadow road):
+    - no grass, flower or stone stands in water;
+    - no reed stands in water deeper than 0.5 m, and over a quarter stand
+      in the shallows;
+    - every reed on the shore has water showing within 2.5 m, read from
+      the drawn arrays: reeds follow the visible shoreline, not the
+      covering disc;
+    - every pond is edged with at least 50 reeds, placed by one drawn slice,
+      none twice;
+    - ground without ponds grows no reeds.
+  - **The land:** on 4 km of one kind, meadow is at least twice as dense as
+    conifer forest and has more flowers; every kind of detail occurs; every
+    tint is in [0, 1).
+  - **Repeatability:** a rebuilt route gets the same details, and a
+    different route different ones.
 - **scene-ponds** — ponds in hollows of the made-up land. It covers a
   30 km flat meadow road, three winding 30 km roads, a hairpin, a
   switchback, an out-and-back and the sample loop.
@@ -210,12 +237,32 @@
     and so does every one of 20 winding flat routes. A ridge 300 m up is
     heath or upland and the climb to it woods or forest. All eight kinds
     occur across these routes.
-- **scene-palette** — the 3D view's colours. In every season:
+- **scene-palette** — the 3D view's colours. In every season (Spring,
+  Summer, Autumn and Winter):
   - every kind of land, farmland's band, the far tint (low to high),
-    every scenery part and water has a colour in [0, 1];
+    every scenery part, every ground detail part, water and the road's
+    asphalt, gravel and paint has a colour in [0, 1];
   - each kind of land has its own colour;
   - one kind's weight alone gives exactly its colour, and only farmland
     shows bands.
+
+  A flower's tint picks one of the three flower colours.
+
+  Across the seasons:
+  - there are four, and the window opens in summer;
+  - the road, its gravel and its paint are identical in all of them, so
+    winter keeps the road clear;
+  - in winter every kind of land and the far land are snow (pale, and at
+    least 0.3 lighter than summer), and the ponds are ice;
+  - autumn crowns include red, orange and yellow hues, and its conifers
+    keep summer's needles;
+  - spring's fields and meadow are greener than summer's;
+  - broadleaf, oak, birch and poplar are bare in winter only, and pine and
+    spruce never.
+
+  The season changes colours only. Only the two mesh builders, the
+  renderer and its interface import the palette, and no placement module
+  uses `Season` or `Palette`.
 - **scene-climbs** — the 3D view's climb banner, from the ride's elevation:
   a 2 km climb at 7% after a flat is one climb starting and ending within
   60 m of where it really does, and 600 m in the banner reads `7%` and
@@ -254,7 +301,12 @@
   is built first and the chunks either side before any tile, and everything
   at the old place is dropped at once. On the way down an out-and-back the
   climb's chunk that draws the road under the rider is built, and chunks
-  made only of repeats never are.
+  made only of repeats never are. Ground details are their own pieces, one
+  per chunk. Played through the sample loop and a 60 km road at 16×, each
+  is built once its chunk's road is within 150 m, none is kept beyond 250 m
+  or dropped nearer, and at most 4 are live at once. After a jump the
+  chunks either side still come before any tile, with only details in
+  between.
 - **route-scene-view** — the Route 3D preview window in jsdom, with a fake
   renderer that records what it is asked and frames stepped by hand (jsdom has
   no WebGL). With a ride running, opening, Close and Escape leave its course
@@ -268,8 +320,13 @@
   the rider; hiding the tab pauses and stops frames, and showing it resumes
   drawing but not playback. Medium (640 px) is the default, Chunky asks for
   480 and Fine for 960; heights start at 2.5× and at 1× the rider's point is at
-  true height. Ten opens and closes make and dispose ten renderers with never
-  two alive, and opening another view replaces the open one. A failed load,
+  true height. The window opens in Summer, telling the renderer nothing.
+  Each other season calls `setSeason` once, and re-choosing the current one
+  does nothing. The same renderer and model are kept, the pieces are built
+  again at once (the road under the rider first) and they place exactly the
+  same items. A new window opens in Summer again, and a season chosen while
+  the renderer loads is handed to it once it is there. Ten opens and
+  closes make and dispose ten renderers with never two alive, and opening another view replaces the open one. A failed load,
   no WebGL and a lost context each show their message, and Close still
   closes. A GPX without elevation opens flat with no elevation or gradient
   value, and a file with one GPS point is refused.

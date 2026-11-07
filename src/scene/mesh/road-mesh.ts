@@ -50,10 +50,7 @@ export function skirtStops(ax: number, az: number, bx: number, bz: number): numb
   return out.filter((t) => t >= 0 && t <= 1).sort((a, b) => a - b);
 }
 
-const ASPHALT: [number, number, number] = [0.33, 0.34, 0.37];
-const GRAVEL: [number, number, number] = [0.52, 0.48, 0.4];
 const EARTH: [number, number, number] = [0.42, 0.36, 0.27];
-const PAINT: [number, number, number] = [0.95, 0.95, 0.92];
 
 export interface RoadChunkData {
   /** asphalt and shoulder, one per layer (some may be empty) */
@@ -243,16 +240,16 @@ export function buildRoadChunk(model: SceneModel, c: number, origin: Origin, exa
     const N4 = [ni, ni, nj, nj];
 
     // asphalt across, then the two shoulders
-    const asphaltI = shade(i, ASPHALT);
-    const asphaltJ = shade(j, ASPHALT);
+    const asphaltI = shade(i, pal.road.asphalt);
+    const asphaltJ = shade(j, pal.road.asphalt);
     road[layer].quad([point(i, -ROAD_HALF_WIDTH), point(i, ROAD_HALF_WIDTH), point(j, -ROAD_HALF_WIDTH), point(j, ROAD_HALF_WIDTH)], N4, [asphaltI, asphaltI, asphaltJ, asphaltJ]);
-    const gravelI = shade(i, GRAVEL, 0.14);
-    const gravelJ = shade(j, GRAVEL, 0.14);
+    const gravelI = shade(i, pal.road.gravel, 0.14);
+    const gravelJ = shade(j, pal.road.gravel, 0.14);
     road[layer].quad([point(i, -ROAD_EDGE), point(i, -ROAD_HALF_WIDTH), point(j, -ROAD_EDGE), point(j, -ROAD_HALF_WIDTH)], N4, [gravelI, gravelI, gravelJ, gravelJ]);
     road[layer].quad([point(i, ROAD_HALF_WIDTH), point(i, ROAD_EDGE), point(j, ROAD_HALF_WIDTH), point(j, ROAD_EDGE)], N4, [gravelI, gravelI, gravelJ, gravelJ]);
 
     // edge lines, and a dashed centre line: 5 m painted in every 10
-    const white: [number, number, number][] = [PAINT, PAINT, PAINT, PAINT];
+    const white: [number, number, number][] = [pal.road.paint, pal.road.paint, pal.road.paint, pal.road.paint];
     for (const e of [-ROAD_HALF_WIDTH + 0.25, ROAD_HALF_WIDTH - 0.25]) {
       marks.quad([point(i, e - 0.08), point(i, e + 0.08), point(j, e - 0.08), point(j, e + 0.08)], N4, white);
     }
@@ -285,8 +282,8 @@ export function buildRoadChunk(model: SceneModel, c: number, origin: Origin, exa
         const inner = [at(ri.x[v], ri.z[v], ri.h[v]), at(rj.x[v], rj.z[v], rj.h[v])];
         const outer = [at(ri.x[v + 1], ri.z[v + 1], ri.h[v + 1]), at(rj.x[v + 1], rj.z[v + 1], rj.h[v + 1])];
         // the first band, next to the shoulder, is gravel; the rest the land's colour
-        const gi = v === 0 ? shade(i, GRAVEL, 0.1) : ci;
-        const gj = v === 0 ? shade(j, GRAVEL, 0.1) : cj;
+        const gi = v === 0 ? shade(i, pal.road.gravel, 0.1) : ci;
+        const gj = v === 0 ? shade(j, pal.road.gravel, 0.1) : cj;
         // both sides split on the outer(i)–inner(j) diagonal, as surfaceAt assumes,
         // and wind facing up: on the left that means going along before across
         if (side > 0) verge[layer].quad([inner[0], outer[0], inner[1], outer[1]], N4, [gi, gi, gj, gj]);

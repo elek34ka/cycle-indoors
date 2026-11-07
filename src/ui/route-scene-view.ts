@@ -10,6 +10,7 @@ import { buildPasses, drawnAt } from '../scene/passes';
 import { FAST_FORWARDS, Playback, POWER_MAX, POWER_MIN, type FastForward } from '../scene/playback';
 import { ViewPose } from '../scene/pose';
 import { buildLand } from '../scene/landscape';
+import { DEFAULT_SEASON, SEASONS, type Season } from '../scene/palette';
 import { buildViewProfile } from '../scene/view-profile';
 import {
   DEFAULT_RESOLUTION, NoWebGLError, RESOLUTIONS,
@@ -40,6 +41,7 @@ export const MESSAGES = {
 } as const;
 
 const RESOLUTION_LABELS: Record<Resolution, string> = { chunky: 'Chunky', medium: 'Medium', fine: 'Fine' };
+const SEASON_LABELS: Record<Season, string> = { spring: 'Spring', summer: 'Summer', autumn: 'Autumn', winter: 'Winter' };
 
 /** Why a track cannot be shown in 3D, or undefined if it can. */
 export function sceneProblem(track: ActivityTrack): string | undefined {
@@ -85,6 +87,8 @@ export class RouteSceneView {
   private renderer: SceneRenderer | undefined;
   private exaggeration = EXAGGERATION_DEFAULT;
   private resolution: Resolution = DEFAULT_RESOLUTION;
+  /** like the resolution, never remembered: every window opens in summer */
+  private season: Season = DEFAULT_SEASON;
   private closed = false;
   private frameHandle: number | undefined;
   private lastTime: number | undefined;
@@ -168,6 +172,7 @@ export class RouteSceneView {
         el('label', { class: 'scene-control' }, ['Power ', power, this.powerLabel]),
         el('label', { class: 'scene-control' }, ['Heights ', exaggeration, this.exaggerationLabel]),
         this.segmented('resolution', (Object.keys(RESOLUTIONS) as Resolution[]).map((r) => [r, RESOLUTION_LABELS[r]]), DEFAULT_RESOLUTION, (v) => this.setResolution(v as Resolution)),
+        this.segmented('season', SEASONS.map((s) => [s, SEASON_LABELS[s]]), DEFAULT_SEASON, (v) => this.setSeason(v as Season)),
       ]),
       el('div', { class: 'scene-readouts' }, [
         readout('Distance', this.readouts.distance),
@@ -224,6 +229,8 @@ export class RouteSceneView {
     if (this.closed) { renderer.dispose(); return; }
     this.renderer = renderer;
     renderer.setResolution(RESOLUTIONS[this.resolution]);
+    // chosen while the renderer was loading
+    if (this.season !== DEFAULT_SEASON) renderer.setSeason(this.season);
     renderer.onContextLost(() => {
       this.stopFrames();
       this.playback.pause();
@@ -263,6 +270,15 @@ export class RouteSceneView {
     this.planner.clear();
     this.renderer?.setExaggeration(this.exaggeration);
     this.resetPose();
+    this.buildAhead();
+  }
+
+  /** Rebuilds every piece in the season's colours; nothing moves. */
+  private setSeason(season: Season): void {
+    if (season === this.season) return;
+    this.season = season;
+    this.planner.clear();
+    this.renderer?.setSeason(season);
     this.buildAhead();
   }
 

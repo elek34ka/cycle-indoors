@@ -16,6 +16,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
+  OctahedronGeometry,
   PerspectiveCamera,
   Quaternion,
   Scene,
@@ -28,7 +29,8 @@ import { buildRoadChunk, ROAD_LAYERS } from '../mesh/road-mesh';
 import { buildPondWater, buildTerrainTile, shiftPositions, type MeshData } from '../mesh/terrain-mesh';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { placeScenery, type SceneryItem, type SceneryKind } from '../scenery';
-import { DEFAULT_PALETTE, type SceneryPart } from '../palette';
+import { placeDetails, type DetailItem, type DetailKind } from '../details';
+import { bare, DEFAULT_PALETTE, flowerPart, palette, type DetailPart, type RGB, type SceneryPart } from '../palette';
 import { NoWebGLError, type FrameView, type SceneModel, type SceneRenderer } from './types';
 
 /**
@@ -55,6 +57,11 @@ const NEAR_PLANE = 0.5;
 /** scenery nearer the camera than this is not drawn; it fades in up to FADE_FAR */
 const FADE_NEAR = 6;
 const FADE_FAR = 10;
+/** ground details are drawn fully out to this, thinning to none at DETAIL_FAR */
+const DETAIL_FULL = 50;
+const DETAIL_FAR = 80;
+/** a details piece is drawn in groups of this many slices, so groups beyond DETAIL_FAR can be skipped whole */
+const DETAIL_GROUP = 10;
 /** trunks reach this far into the ground, so a small slope never shows a gap */
 const SINK = 0.4;
 
@@ -73,11 +80,21 @@ function layered<M extends Material>(material: M, level: number): M {
 }
 
 /**
- * Scenery fades out near the camera by an ordered (Bayer 4×4) dither in the
- * fragment shader: nothing within FADE_NEAR, thinning in up to FADE_FAR. It
- * works for instanced meshes at no CPU cost and suits the pixel look.
+ * Fades by an ordered (Bayer 4×4) dither in the fragment shader, by distance
+ * from the camera: nothing nearer than `near[0]`, thinning in up to
+ * `near[1]`; and from `far[0]` thinning out to nothing at `far[1]`. It works
+ * for instanced meshes at no CPU cost and suits the pixel look. Scenery
+ * fades near the camera, so no tree fills the view; ground details fade far
+ * away, so they never end at a hard edge.
  */
-function withNearFade<M extends Material>(material: M): M {
+function withFade<M extends Material>(material: M, near: [number, number] | null, far: [number, number] | null): M {
+  const f = (v: number) => v.toFixed(1);
+  const tests = [
+    near && `if (fadeDistance < ${f(near[0])}) discard;
+        if ((fadeDistance - ${f(near[0])}) / ${f(near[1] - near[0])} < fadeThreshold) discard;`,
+    far && `if (fadeDistance > ${f(far[1])}) discard;
+        if ((${f(far[1])} - fadeDistance) / ${f(far[1] - far[0])} < fadeThreshold) discard;`,
+  ].filter(Boolean).join('\n        ');
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vFadeWorld;')
@@ -97,15 +114,39 @@ function withNearFade<M extends Material>(material: M): M {
         }`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
         float fadeDistance = distance(vFadeWorld, cameraPosition);
-        if (fadeDistance < ${FADE_NEAR.toFixed(1)}) discard;
-        if ((fadeDistance - ${FADE_NEAR.toFixed(1)}) / ${(FADE_FAR - FADE_NEAR).toFixed(1)} < bayer4(gl_FragCoord.xy)) discard;`);
+        float fadeThreshold = bayer4(gl_FragCoord.xy);
+        ${tests}`);
   };
-  material.customProgramCacheKey = () => 'near-fade';
+  material.customProgramCacheKey = () => `fade ${near?.join()} ${far?.join()}`;
   return material;
+}
+
+/**
+ * Thin upright blades, a triangle each, fanned around the vertical: `count`
+ * of them, `height` tall and `width` wide at the foot, leaning out by `lean`
+ * metres at the tip, from a little below the ground.
+ */
+function blades(count: number, height: number, width: number, lean: number, sink = 0.05): BufferGeometry {
+  const positions: number[] = [];
+  for (let k = 0; k < count; k++) {
+    const a = (k / count) * Math.PI * 2 + 0.4 * k;
+    const ox = Math.cos(a);
+    const oz = Math.sin(a);
+    // the foot across the lean direction, the tip leaning out
+    const fx = -oz * (width / 2);
+    const fz = ox * (width / 2);
+    positions.push(-fx, -sink, -fz, fx, -sink, fz, ox * lean, height, oz * lean);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 interface Built {
   objects: (Mesh | InstancedMesh)[];
+  /** hides whatever cannot be seen from the camera at (x, y, z), before a frame */
+  cull?: (x: number, y: number, z: number) => void;
   /** moves every vertex and instance by the integer change of origin */
   shift: (dx: number, dz: number) => void;
   dispose: () => void;
@@ -141,7 +182,7 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
   renderer.setSize(640, 360, false);
 
   const { g, p, ground, land, seed } = model;
-  const pal = DEFAULT_PALETTE;
+  let pal = DEFAULT_PALETTE;
   let exaggeration = initialExaggeration;
   const Y = (h: number) => (h - ground.base) * exaggeration;
   let ox = 0;
@@ -164,8 +205,10 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
   const waterMaterial = new MeshLambertMaterial({ vertexColors: true });
   const markingMaterial = layered(new MeshBasicMaterial({ vertexColors: true, side: DoubleSide }), 1 + 2 * ROAD_LAYERS);
   // every tree, bush, rock and post: one white material, coloured per instance from the palette
-  const sceneryMaterial = withNearFade(new MeshLambertMaterial({ color: 0xffffff, flatShading: true }));
-  const allMaterials: Material[] = [groundMaterial, skirtMaterial, ...vergeMaterials, ...roadMaterials, markingMaterial, waterMaterial, sceneryMaterial];
+  const sceneryMaterial = withFade(new MeshLambertMaterial({ color: 0xffffff, flatShading: true }), [FADE_NEAR, FADE_FAR], null);
+  // every grass tuft, flower, stone and reed: the same, two-sided for the blades, fading out far away
+  const detailMaterial = withFade(new MeshLambertMaterial({ color: 0xffffff, flatShading: true, side: DoubleSide }), null, [DETAIL_FULL, DETAIL_FAR]);
+  const allMaterials: Material[] = [groundMaterial, skirtMaterial, ...vergeMaterials, ...roadMaterials, markingMaterial, waterMaterial, sceneryMaterial, detailMaterial];
   const trunk = (bottom: number, top: number, height: number) =>
     new CylinderGeometry(top, bottom, height + SINK, 5).translate(0, (height + SINK) / 2 - SINK, 0);
   /** a branch: a thin box from the trunk at height h, leaning out by `lean` radians toward `turn` */
@@ -188,9 +231,28 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
     poplar: new IcosahedronGeometry(1.4, 0).scale(0.8, 3.3, 0.8).translate(0, 6.2, 0),
     deadTrunk: trunk(0.3, 0.16, 5),
     branches: mergeGeometries([branch(2.6, 2.2, 0.75, 0), branch(3.4, 1.8, 0.7, 2.2), branch(4.1, 1.5, 0.6, 4.2)]),
+    // winter crowns of the trees that lose their leaves: bare branches, in each tree's own outline
+    bareBroadleaf: mergeGeometries([branch(2.7, 2.4, 0.8, 0), branch(3.1, 2.2, 0.7, 1.3), branch(3.5, 2.1, 0.75, 2.6), branch(3.9, 1.9, 0.6, 3.9), branch(4.3, 1.6, 0.5, 5.2), branch(4.5, 1.6, 0.15, 0.7)]),
+    bareOak: mergeGeometries([branch(2.4, 3, 1.05, 0.3), branch(2.6, 2.8, 1.0, 1.6), branch(2.9, 2.8, 0.95, 2.9), branch(3.1, 2.6, 0.9, 4.2), branch(3.4, 2.4, 0.85, 5.4), branch(3.8, 1.8, 0.4, 1)]),
+    bareBirch: mergeGeometries([branch(3.8, 1.5, 0.5, 0), branch(4.4, 1.4, 0.45, 2.1), branch(5, 1.3, 0.4, 4.2), branch(5.4, 1.4, 0.15, 1)]),
+    barePoplar: mergeGeometries([branch(2.2, 3.6, 0.22, 0), branch(2.6, 3.4, 0.2, 2.1), branch(3, 3.2, 0.18, 4.2), branch(2, 4.4, 0.05, 1)]),
     bush: new IcosahedronGeometry(1.1, 0).translate(0, 0.6, 0),
     rock: new DodecahedronGeometry(1.1, 0).scale(1, 0.6, 1).translate(0, 0.3, 0),
     post: new BoxGeometry(0.14, 1.1 + SINK, 0.14).translate(0, (1.1 + SINK) / 2 - SINK, 0),
+    // ground details, a few triangles each
+    grass: blades(3, 0.35, 0.12, 0.12),
+    stem: blades(1, 0.32, 0.04, 0.03),
+    flower: new OctahedronGeometry(0.06, 0).translate(0, 0.33, 0),
+    stone: new OctahedronGeometry(0.22, 0).scale(1, 0.5, 0.8).translate(0, 0.04, 0),
+    reed: blades(5, 1.0, 0.06, 0.18),
+    reedHead: new BoxGeometry(0.05, 0.16, 0.05).translate(0, 0.92, 0),
+  };
+  /** what each deciduous tree is made of when bare: its trunk, and bare branches in place of the crown */
+  const bareParts: Partial<Record<SceneryKind, [BufferGeometry, SceneryPart][]>> = {
+    broadleaf: [[shapes.trunk, 'trunk'], [shapes.bareBroadleaf, 'branches']],
+    oak: [[shapes.oakTrunk, 'trunk'], [shapes.bareOak, 'branches']],
+    birch: [[shapes.birchTrunk, 'paleTrunk'], [shapes.bareBirch, 'branches']],
+    poplar: [[shapes.poplarTrunk, 'trunk'], [shapes.barePoplar, 'branches']],
   };
   /** what each kind of scenery is made of: [shape, the palette colour it takes] */
   const parts: Record<SceneryKind, [BufferGeometry, SceneryPart][]> = {
@@ -204,6 +266,14 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
     bush: [[shapes.bush, 'bush']],
     rock: [[shapes.rock, 'rock']],
     post: [[shapes.post, 'post']],
+  };
+
+  /** what each kind of ground detail is made of: [shape, its colour, or a flower's by its tint] */
+  const detailParts: Record<DetailKind, [BufferGeometry, DetailPart | 'flower'][]> = {
+    grass: [[shapes.grass, 'grass']],
+    flower: [[shapes.stem, 'grass'], [shapes.flower, 'flower']],
+    stone: [[shapes.stone, 'stone']],
+    reed: [[shapes.reed, 'reed'], [shapes.reedHead, 'reedHead']],
   };
 
   const pieces = new Map<string, Built>();
@@ -220,9 +290,15 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
     return out;
   }
 
-  function scenery(from: number, to: number): InstancedMesh[] {
-    const items = placeScenery(g, p, ground, land, seed, from, to);
-    const byKind = new Map<SceneryKind, SceneryItem[]>();
+  type Placed = SceneryItem | DetailItem;
+  /**
+   * One instanced mesh per kind and part: every item stands at its base, turned
+   * and scaled, a little lighter or darker by its tint so no two neighbours match.
+   */
+  function instanced<K extends string, I extends Placed & { kind: K }>(
+    items: I[], partsOf: (kind: K) => [BufferGeometry, (it: I) => readonly number[]][], material: Material,
+  ): InstancedMesh[] {
+    const byKind = new Map<K, I[]>();
     for (const it of items) {
       const list = byKind.get(it.kind);
       if (list) list.push(it); else byKind.set(it.kind, [it]);
@@ -235,11 +311,11 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
     const scale = new Vector3();
     const tinted = new Color();
     for (const [kind, list] of byKind) {
-      for (const [shape, part] of parts[kind]) {
-        const mesh = new InstancedMesh(shape, sceneryMaterial, list.length);
+      for (const [shape, colour] of partsOf(kind)) {
+        const mesh = new InstancedMesh(shape, material, list.length);
         mesh.matrixAutoUpdate = false;
-        const [r, gr, b] = pal.scenery[part];
         list.forEach((it, n) => {
+          const [r, gr, b] = colour(it);
           q.setFromAxisAngle(up, it.turn);
           pos.set(it.x - ox, Y(it.y), it.z - oz);
           scale.setScalar(it.scale);
@@ -255,6 +331,35 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
       }
     }
     return out;
+  }
+
+  function scenery(from: number, to: number): InstancedMesh[] {
+    return instanced(placeScenery(g, p, ground, land, seed, from, to),
+      (kind: SceneryKind) => ((bare(kind, pal.season) && bareParts[kind]) || parts[kind]).map(([shape, part]) => [shape, () => pal.scenery[part]]), sceneryMaterial);
+  }
+
+  function buildDetails(c: number): Built {
+    const [from, to] = model.chunkRange(c);
+    const partsOf = (kind: DetailKind) => detailParts[kind].map(([shape, part]) =>
+      [shape, (it: DetailItem) => pal.details[part === 'flower' ? flowerPart(it.tint) : part]] as [BufferGeometry, (it: DetailItem) => RGB]);
+    // in groups of DETAIL_GROUP slices: each group's meshes are bounded by their own
+    // instances, so a group beyond DETAIL_FAR is skipped whole and one behind is culled
+    const groups = new Map<number, DetailItem[]>();
+    for (const it of placeDetails(g, p, ground, land, seed, from, to)) {
+      const k = Math.floor(it.slice / DETAIL_GROUP);
+      const list = groups.get(k);
+      if (list) list.push(it); else groups.set(k, [it]);
+    }
+    const objects: InstancedMesh[] = [];
+    for (const list of groups.values()) objects.push(...instanced(list, partsOf, detailMaterial));
+    const built = assemble(objects);
+    built.cull = (x, y, z) => {
+      for (const mesh of objects) {
+        const sphere = mesh.boundingSphere;
+        mesh.visible = !sphere || Math.hypot(sphere.center.x - x, sphere.center.y - y, sphere.center.z - z) - sphere.radius < DETAIL_FAR;
+      }
+    };
+    return built;
   }
 
   function assemble(objects: (Mesh | InstancedMesh)[]): Built {
@@ -321,10 +426,15 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
       exaggeration = value;
       api.clear();
     },
+    setSeason(season) {
+      if (season === pal.season) return;
+      pal = palette(season);
+      api.clear();
+    },
     build(piece) {
       const key = pieceKey(piece);
       if (pieces.has(key)) return;
-      const built = piece.kind === 'chunk' ? buildChunk(piece.index) : buildTile(piece.tx, piece.tz);
+      const built = piece.kind === 'chunk' ? buildChunk(piece.index) : piece.kind === 'details' ? buildDetails(piece.index) : buildTile(piece.tx, piece.tz);
       for (const object of built.objects) scene.add(object);
       pieces.set(key, built);
     },
@@ -353,6 +463,7 @@ export function createSceneRenderer(model: SceneModel, initialExaggeration: numb
       const [tx, ty, tz] = view.camera.target;
       camera.position.set(cx - ox, cy, cz - oz);
       camera.lookAt(tx - ox, ty, tz - oz);
+      for (const built of pieces.values()) built.cull?.(camera.position.x, camera.position.y, camera.position.z);
       renderer.render(scene, camera);
     },
     onContextLost(listener) {

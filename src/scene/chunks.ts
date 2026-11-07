@@ -12,6 +12,11 @@ import type { Passes } from './passes';
  * under the rider belongs to the way up, a chunk many kilometres back.
  * A chunk made only of repeats draws nothing and is never built, so a route
  * of many laps stays as light as one lap.
+ *
+ * Each chunk also has a `details` piece: its grass, flowers, stones and
+ * reeds (`details.ts`), small and many, so they exist only near the rider:
+ * built once the chunk's road comes within DETAILS_BUILD and dropped beyond
+ * DETAILS_DROP. The renderer draws them only within 80 m anyway.
  */
 
 export const CHUNK_SLICES = 100;
@@ -22,10 +27,14 @@ const DROP_RADIUS = 3400;
 /** a tile waits this much longer than a chunk at the same distance: the road
  *  within a kilometre comes before any far ground */
 const TILE_PENALTY = 1000;
+/** a chunk's details are built when its road is this near the rider… */
+export const DETAILS_BUILD = 150;
+/** …and dropped beyond this */
+export const DETAILS_DROP = 250;
 
-export type Piece = { kind: 'chunk'; index: number } | { kind: 'tile'; tx: number; tz: number };
+export type Piece = { kind: 'chunk'; index: number } | { kind: 'details'; index: number } | { kind: 'tile'; tx: number; tz: number };
 
-export const pieceKey = (p: Piece) => (p.kind === 'chunk' ? `c${p.index}` : `t${p.tx},${p.tz}`);
+export const pieceKey = (p: Piece) => (p.kind === 'chunk' ? `c${p.index}` : p.kind === 'details' ? `d${p.index}` : `t${p.tx},${p.tz}`);
 
 interface Box { x0: number; x1: number; z0: number; z1: number }
 
@@ -35,6 +44,8 @@ const boxDistance = (b: Box, x: number, z: number) =>
 export class ChunkPlanner {
   readonly chunkCount: number;
   private readonly boxes: (Box | null)[] = [];
+  /** each chunk's drawn road alone, without the scenery's margin */
+  private readonly roads: (Box | null)[] = [];
   private readonly built = new Map<string, Piece>();
 
   constructor(private readonly g: RouteGeometry, p: Passes) {
@@ -52,6 +63,7 @@ export class ChunkPlanner {
           else { box.x0 = Math.min(box.x0, x); box.x1 = Math.max(box.x1, x); box.z0 = Math.min(box.z0, z); box.z1 = Math.max(box.z1, z); }
         }
       }
+      this.roads.push(box && { ...box });
       // scenery reaches up to 120 m beside the road
       if (box) { box.x0 -= 150; box.x1 += 150; box.z0 -= 150; box.z1 += 150; }
       this.boxes.push(box);
@@ -69,20 +81,29 @@ export class ChunkPlanner {
     return this.boxes[c] !== null;
   }
 
-  private distanceTo(piece: Piece, x: number, z: number): number {
-    if (piece.kind === 'chunk') {
-      const box = this.boxes[piece.index];
+  /** How far piece is from (x, z): a chunk's box with its scenery margin, its details' bare road, or a tile. */
+  distanceTo(piece: Piece, x: number, z: number): number {
+    if (piece.kind === 'chunk' || piece.kind === 'details') {
+      const box = (piece.kind === 'chunk' ? this.boxes : this.roads)[piece.index];
       return box ? boxDistance(box, x, z) : Infinity;
     }
     return boxDistance({ x0: piece.tx * TILE_SIZE, x1: (piece.tx + 1) * TILE_SIZE, z0: piece.tz * TILE_SIZE, z1: (piece.tz + 1) * TILE_SIZE }, x, z);
   }
 
-  /** Everything that should exist with the rider at (x, z), nearest first. */
+  /**
+   * Everything that should exist with the rider at (x, z), nearest first:
+   * chunks and tiles within `radius`, details within DETAILS_BUILD. On a
+   * tie a chunk comes before its details.
+   */
   wanted(x: number, z: number, radius = BUILD_RADIUS): Piece[] {
     const out: [number, Piece][] = [];
     for (let c = 0; c < this.chunkCount; c++) {
       const d = this.distanceTo({ kind: 'chunk', index: c }, x, z);
       if (d <= radius) out.push([d, { kind: 'chunk', index: c }]);
+    }
+    for (let c = 0; c < this.chunkCount; c++) {
+      const d = this.distanceTo({ kind: 'details', index: c }, x, z);
+      if (d <= DETAILS_BUILD) out.push([d, { kind: 'details', index: c }]);
     }
     const t0x = Math.floor((x - radius) / TILE_SIZE);
     const t1x = Math.floor((x + radius) / TILE_SIZE);
@@ -107,7 +128,7 @@ export class ChunkPlanner {
   frame(x: number, z: number): { build: Piece | null; drop: Piece[] } {
     const drop: Piece[] = [];
     for (const [key, piece] of this.built) {
-      if (this.distanceTo(piece, x, z) > DROP_RADIUS) { drop.push(piece); this.built.delete(key); }
+      if (this.distanceTo(piece, x, z) > (piece.kind === 'details' ? DETAILS_DROP : DROP_RADIUS)) { drop.push(piece); this.built.delete(key); }
     }
     let build: Piece | null = null;
     for (const piece of this.wanted(x, z)) {
