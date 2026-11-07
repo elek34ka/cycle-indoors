@@ -25,6 +25,8 @@ import type { Segment } from '../workout/types';
 import { confirmDialog } from './confirm';
 import { clear, el, toast } from './dom';
 import { routeProfileSvg, workoutProfileSvg } from './library-profile';
+import { loadFile as parseFile } from '../loaders';
+import type { RendererLoader } from '../scene/render/types';
 import type { LoadOrigin } from './ride-view';
 import { RouteSmootherView } from './route-smoother-view';
 
@@ -108,12 +110,16 @@ export class LibraryView {
   /** the route it is open on; nothing else shows it */
   private smoothKey: string | undefined;
   private smoothLoadingKey: string | undefined;
+  /** the route whose 3D view is being fetched */
+  private sceneLoadingKey: string | undefined;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly host: LibraryHost,
     private readonly client: CatalogClient = new CatalogClient(),
     private readonly personal?: PersonalLibrary,
+    /** the 3D view's renderer; tests pass a stand-in, since jsdom has no WebGL */
+    private readonly sceneRenderer?: RendererLoader,
   ) {
     clear(root);
     const toggle = el('div', { class: 'toggle lib-sections' });
@@ -541,7 +547,7 @@ export class LibraryView {
     const row = el('div', { class: 'lib-actions' }, item.absent ? [] : [this.rideButton(item.key, () => void this.ride(item, title), true)]);
     // Routes are not workouts: only workouts are marked done.
     if ('title' in item) row.append(this.doneToggle(item.key));
-    else if (!item.absent) row.append(this.smoothButton(item));
+    else if (!item.absent) row.append(this.smoothButton(item), this.sceneButton(item));
     if ('title' in item && !this.canMark) {
       row.append(el('span', { class: 'lib-done-note', text: 'Done marks cannot be saved in this browser.' }));
     }
@@ -673,6 +679,17 @@ export class LibraryView {
       text: loading ? 'Loading…' : open ? 'Close smoother' : 'Smooth',
       disabled: this.smoothLoadingKey !== undefined,
       on: { click: () => void this.smooth(r) },
+    }) as HTMLButtonElement;
+  }
+
+  /** Opens the Route 3D preview. Not tied to the ride, so it works mid-ride. */
+  private sceneButton(r: RouteItem): HTMLButtonElement {
+    const loading = r.key === this.sceneLoadingKey;
+    return el('button', {
+      type: 'button', class: 'btn lib-scene', dataset: { key: r.key },
+      text: loading ? 'Loading…' : '3D view',
+      disabled: this.sceneLoadingKey !== undefined,
+      on: { click: () => void this.openScene(r) },
     }) as HTMLButtonElement;
   }
 
@@ -831,6 +848,34 @@ export class LibraryView {
       toast(`Could not smooth "${r.name}": ${(err as Error).message}`, 'error');
     } finally {
       this.smoothLoadingKey = undefined;
+      this.renderDetail();
+    }
+  }
+
+  /**
+   * Fetches a route as Ride does (checked against the catalog, or kept in My
+   * library) and parses it on its own, then opens the 3D view over the
+   * Library. The ride is never loaded: the window has its own course. The
+   * window's code, and three.js behind it, load only now.
+   */
+  private async openScene(r: RouteItem): Promise<void> {
+    if (this.sceneLoadingKey !== undefined || !r.fileName) return;
+    this.sceneLoadingKey = r.key;
+    this.renderDetail();
+    try {
+      const bytes = await this.entryBytes(r);
+      const { track } = await parseFile(new File([bytes as BlobPart], r.fileName), { ftp: settings.current.ftp });
+      if (!track) throw new Error('it is not a route');
+      const { openRouteScene, sceneProblem } = await import('./route-scene-view');
+      const problem = sceneProblem(track);
+      if (problem) throw new Error(problem);
+      // The rider may have moved on while the file was on its way.
+      if (this.section !== 'routes' || this.selected.routes !== r.key) return;
+      openRouteScene({ track, name: r.name, loadRenderer: this.sceneRenderer });
+    } catch (err) {
+      toast(`Could not load "${r.name}": ${(err as Error).message}`, 'error');
+    } finally {
+      this.sceneLoadingKey = undefined;
       this.renderDetail();
     }
   }

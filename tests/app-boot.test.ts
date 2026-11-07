@@ -26,6 +26,13 @@ const { averages, tileStripe } = await import('../src/ui/ride-view');
 const { POWER_ZONES, HR_ZONES } = await import('../src/core/zones');
 const { readFileSync } = await import('node:fs');
 const { LIBRARY } = await import('../src/workout/library');
+const { CatalogClient } = await import('../src/catalog/client');
+
+/** The 3D view's renderer loader, counting calls: nothing here should open one. */
+let sceneLoaderCalls = 0;
+const countingSceneLoader = async () => { sceneLoaderCalls++; throw new Error('the 3D view was not asked for'); };
+/** Opening the Library fetches the catalog; never the real bucket from a test. */
+const offlineCatalog = new CatalogClient('https://pub-test.r2.dev', async () => { throw new TypeError('offline'); });
 
 const doc = dom.window.document;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -52,7 +59,7 @@ const simulatorDefault = settings.current.useMockDevices;
 settings.patch({ useMockDevices: true });
 
 let bootError: Error | undefined;
-try { bootApp(); } catch (err) { bootError = err as Error; }
+try { bootApp({ catalog: offlineCatalog, sceneRenderer: countingSceneLoader }); } catch (err) { bootError = err as Error; }
 
 suite('boot', () => {
   check('bootApp does not throw', bootError === undefined, bootError?.stack);
@@ -634,6 +641,25 @@ suite('a chip with nothing behind it pairs one', () => {
     errors.map((t) => t.textContent).join(' | ') || 'no toast');
   check('and the chip is offered again once that fails',
     !hrChip.disabled && hrChip.textContent === 'No HR', `${hrChip.disabled} ${hrChip.textContent}`);
+});
+
+// Browse the Library's routes and smooth a route in Settings: neither opens a 3D view.
+doc.querySelector<HTMLButtonElement>('#tabs [data-tab="library"]')?.click();
+await wait(50);
+doc.querySelector<HTMLButtonElement>('#library-root .lib-sections [data-section="routes"]')?.click();
+{
+  const event = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { files: [new File([readFileSync('samples/sample-hilly-loop.gpx', 'utf8')], 'sample-hilly-loop.gpx')] } });
+  doc.querySelector('#smoother-drop')?.dispatchEvent(event);
+}
+await wait(150);
+
+suite('the 3D view stays unloaded unless asked for', () => {
+  check('the Library was browsed', doc.querySelector('#view-library')?.classList.contains('active') === true);
+  check('the Settings smoother has the route', doc.querySelector('#smoother-source')?.textContent?.startsWith('Sample hilly loop') === true,
+    doc.querySelector('#smoother-source')?.textContent ?? '');
+  check('booting, riding, browsing and smoothing never loaded the 3D renderer', sceneLoaderCalls === 0, `${sceneLoaderCalls}`);
+  check('and no 3D window opened', doc.querySelector('.scene-dialog') === null);
 });
 
 suite('no console errors along the way', () => {

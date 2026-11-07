@@ -1,3 +1,4 @@
+import type { RendererLoader } from '../scene/render/types';
 import { hub } from '../devices/hub';
 import { registerMockDevices, mock } from '../devices/setup';
 import { restorePairedDevices } from '../devices/ble/pair';
@@ -27,6 +28,8 @@ export interface BootOptions {
   store?: Promise<LibraryStore>;
   /** the backup; tests pass one over a stand-in vault */
   backup?: (personal: PersonalLibrary) => Backup;
+  /** the 3D view's renderer; tests pass a stand-in, since jsdom has no WebGL */
+  sceneRenderer?: RendererLoader;
 }
 
 export function bootApp(options: BootOptions = {}): void {
@@ -57,7 +60,7 @@ export function bootApp(options: BootOptions = {}): void {
     loadBuiltin: (id) => rideView.loadBuiltin(id),
     loadFile: (file, origin, entry) => rideView.loadFromSource(file, origin, entry),
     showRide: () => show('ride'),
-  }, options.catalog, personal);
+  }, options.catalog, personal, options.sceneRenderer);
   tabs.addEventListener('click', (e) => {
     const button = (e.target as HTMLElement).closest('button');
     if (button?.dataset.tab) show(button.dataset.tab as TabName);
