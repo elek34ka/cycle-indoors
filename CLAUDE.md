@@ -169,6 +169,66 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   specified key does not exist." — the sync treats only that as an empty
   bucket.
 
+- **Only `src/scene/render/` may import `three`.** It is a separate
+  ~135 KB gzipped chunk, fetched when a 3D view first opens; one stray import
+  elsewhere pulls it into the main bundle (`grep -rn "from 'three'" src`). The
+  window and its tests talk to the renderer only through
+  `src/scene/render/types.ts`, which never imports it.
+- **The suite cannot create WebGL**, so it never sees the 3D view drawn.
+  Every spatial rule (where the road is, what repeats, what keeps clear of
+  it, how high the land is, how the rider and camera move) belongs in a pure
+  `src/scene/` module with its own suite; the renderer only draws what they
+  decide, and the window is tested with a fake renderer. Claims about how it
+  looks need a real browser.
+- **The 3D view's heights are not the ride's.** `view-profile.ts` fits drawn
+  heights within ±20% and 2 points per 10 m; readouts, the climb banner and
+  playback speed read `course.at(d)`. The window builds its own `Course` and
+  never touches `courseStore` or the session.
+- **A repeated stretch is drawn by its first pass** (`passes.ts`): the rider
+  on a later pass rides `px/pz/ph`, the drawn line, not the GPS line. So
+  chunks are chosen by distance in space, not along the route, and scenery
+  clearance is measured against the drawn lines.
+- **Shared vertices are bit-identical only by construction.** Ground tiles
+  and road chunks (`src/scene/mesh/`) round every horizontal coordinate to
+  1/256 m (`quantise` in `ground.ts`), subtract one integer origin shared by
+  the whole scene, and are drawn with an identity matrix; a re-base shifts
+  the buffers in place (`shiftPositions`). Never position a piece by its own
+  group offset or build it relative to its own origin: the two sides of a
+  seam would round differently and crack. Normals at a tile edge come from a
+  border ring for the same reason.
+- **"Drawn height" is the mesh, not a function.** `drawnHeightAt`
+  interpolates the 10 m lattice on the tiles' own diagonal, and `surfaceAt`
+  adds the verge and road triangles exactly as `road-mesh.ts` splits them
+  (both sides on the same diagonal, corners rounded). Scenery, the camera
+  and skirts use these, never `latticeHeight` between lattice points. A
+  change to how either mesh splits a quad must change these too;
+  `scene-scenery` reads bases back from the arrays and catches it.
+- **A pond never changes a lattice point within `POND_UNTOUCHABLE`
+  (about 20 m) of any pass**: the road's footprint, flat zone, edge skirt
+  and the floating check 1 m past the edge read those. A verge reads
+  further, to about 34 m (`VERGE_READS`), so `vergeWidth` cuts the verge
+  to 0 on any side whose reach a pond changes; the road edge then meets
+  the ground as it does wherever no verge fits. Change either distance and
+  the seam measures must be re-run with ponds on.
+- **Ponds sit by the road on purpose.** At 100–400 m the owner found
+  none, and even at 30–60 m they were 0–12 px tall: the eye is 1.5 scene
+  units over land drawn up to 4× taller, and the window shows only ±46°
+  across, so a pond is seen ahead and at a slant. Visibility rests on:
+  - the level coming from the road-side (untouchable) shore, not the
+    lowest shore anywhere;
+  - the rest of the shore brought to a low ring just above the water;
+  - only nearly level road (`BANK_SPREAD`, `MAX_SLOPE`) getting ponds;
+  - a sight lane kept clear of scenery.
+
+  `scene-ponds` measures sight lines over the drawn ground. A pond's level
+  comes from the lattice *before* ponds, so neighbours closer than
+  `separation` are both dropped; the decision reads only the neighbours'
+  provisional ponds, so it never depends on the order cells are asked in.
+  The ground has ponds only when `buildGround` is given the route's `Land`.
+- **`forEachSegmentNear` and `forEachRoadNear` are not re-entrant**: they
+  share visited marks and scratch arrays. Collect hits first, then do
+  anything that searches again (a verge ring, a lattice height).
+
 ## Decisions worth not re-litigating
 
 - `setResistance` is **deliberately unimplemented**: FTMS defines the target as

@@ -74,6 +74,14 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
 - **Route smoother** (Settings, or Smooth on any Library route) takes GPS
   noise and sudden ramps out of the elevation. Choose a preset or set limits,
   compare before and after, then ride the result or download it as `.gpx`.
+- **Route 3D preview** (3D view on any Library route): the route ridden in
+  pixelated 3D on simulated power, seen first person from the saddle, with
+  climbs, bends and repeated roads drawn once. The land changes along the
+  way, between fields, meadow, farmland, woods, forest, heath and rocky upland,
+  chosen from the route's height and gradient, with ponds beside the road
+  where it runs nearly level, their water from about 20 m off it. It is all made up from the
+  route alone, so it will often be wrong for the real place, and nothing
+  about the route leaves the browser to build it.
 
 ### Library
 
@@ -83,6 +91,10 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   a reload.
 - **Training plans**: follow one, mark workouts done, and the next undone
   workout is offered as **Up next**.
+- **3D view** on a route's details opens the Route 3D preview in a window of
+  its own. It is a preview: it never changes the ride's course, the session
+  or the trainer, so it works mid-ride too. Play rides it at 80–450 W through
+  the ride's own physics, at 1×, 4× or 16×; click the profile to jump.
 
 ### After the ride
 
@@ -148,7 +160,12 @@ src/
   devices/ble/ Web Bluetooth: parsers, GATT transport with reconnect, pairing,
                FTMS control point, Bluetooth log
   ui/          app shell, ride view, graphs, mini map, summary, settings,
-               devices, route smoother, Library
+               devices, route smoother, Library, Route 3D preview window
+  scene/       Route 3D preview: route geometry, drawn heights, repeated
+               passes, kinds of land and their colours, made-up ground,
+               ponds and scenery, mesh builders, the first-person view,
+               playback and chunking, all pure; render/ is the only code
+               that imports three.js, loaded on first use
   catalog/     content catalog: index format, summaries, builder, sync, client
   library/     Library entries, search and filters, the IndexedDB store
   ride-log/    the ride log's entry for a finished ride

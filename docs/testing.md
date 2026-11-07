@@ -67,6 +67,222 @@
   20 m off a road to its foot, and the gradient-coloured runs on a flat, climb,
   flat road come out as exactly three that join end to end, with no point lost
   on the sample route.
+- **scene-geometry** — the 3D view's route geometry: the sample loop and a
+  20.4 km winding route come out as long in 10 m slices as the ride measures
+  them, within 0.5%, with unit tangents; eastbound travel points east with
+  south on the right and northbound has east on the right; and a route that
+  doubles back on itself keeps finite tangents that point back west.
+- **scene-view-profile** — the heights the 3D view draws, never what is
+  ridden: a 15 m one-point spike on flat road is drawn flat within 0.5 m
+  while the ride's own gradient and elevation are exactly as before; a 28%
+  ramp is drawn at 20% or less and still as a climb; a 20 m dip with 70 m
+  walls is drawn within 10 m and at least 12 m deep; over 200 random noisy
+  routes the drawn height stays within 10 m of the route's, the drawn
+  gradient within ±20%, changing by at most 2 points per 10 m; and a route
+  without elevation is drawn flat.
+- **scene-passes** — where the 3D view's route meets itself: on an
+  out-and-back climb every descending slice from 50 m past the top repeats a
+  slice of the climb and rides its road (same height within 0.9 m, on its
+  centre line, not 1 m beside it), and nothing is drawn twice at the
+  turnaround. A route that never nears itself has no repeats and 150 m of
+  room either side (the widths that bound verges and scenery); a hairpin's
+  legs 30 m apart stay two roads with at most 15 m of room between them and
+  150 m outside; a right-angle crossing at equal height is not a repeat; on
+  a 20 m radius bend the room on the inside stops short of the bend's
+  centre and its edge never runs backwards (which would fold a verge over),
+  while the outside keeps 150 m; and the sample loop has none, apart from
+  its last 20 m riding onto its own start.
+- **scene-ground** — the drawn ground and the road meet with no gap and
+  no overlap. It covers a road east, a road at 30° to the lattice climbing
+  6%, a hairpin, a U-turn with legs 12 m apart, a switchback 40 m beside and
+  25 m above itself, an out-and-back climb, a valley, a ridge and the sample
+  loop.
+  - **Cover:** across every road, every 0.5 m, the drawn ground (the 10 m
+    lattice interpolated exactly as its triangles are) is below the road.
+  - **Floating:** where a verge is drawn, its inner edge is exactly the
+    road's edge and its next ring is level with the road unless another,
+    lower pass is near. Where none fits, the drawn surface 0.5 m and 1 m
+    beside the edge is within 0.5 m drawn (at 4×), except at a U-turn or
+    where another pass meets this one within 40 m.
+  - **Verges and surface:** a verge never reaches another road, and
+    `surfaceAt` is never below the lattice.
+  - **Other cases:** lattice points and cell diagonals agree with
+    `drawnHeightAt`; the switchback's lower road is not buried; a valley's
+    sides still rise.
+
+  - **Ponds:** a winding 12 km meadow road with ponds gives every seam
+    measure (cover, floating, slivers, flicker, chunk boundaries, rejoins)
+    zero, with ponds and without. Its verges are cut back beside the ponds
+    and nowhere else.
+
+  The measures are in `tests/scene-seams.ts`, shared with a local run on
+  the owner's route. Cutting the flat zone back to the road's edge fails 7
+  of the 8 cover checks.
+- **scene-terrain-mesh** — the arrays a 1 km ground tile hands the GPU:
+  - 101 × 101 vertices, every inner edge shared by two triangles and only
+    the border by one, with no degenerate triangles;
+  - unit normals that point up;
+  - built in under 300 ms;
+  - its east and south edges equal its neighbours' bit for bit, in
+    positions, normals and colours. One-sided normals at the edge fail this
+    with 101 differences;
+  - a tile shifted to a new origin equals one built there, bit for bit;
+  - `drawnHeightAt` agrees with the tile's own triangles at 500 random
+    points;
+  - **pond water**, on the sample loop's two ponds:
+    - each pond is drawn by exactly one tile, as a 32-sided fan, flat at
+      its level and facing up;
+    - it covers the whole disc of radius R;
+    - the drawn ground is above the water at every rim vertex and at
+      tenths along every edge, so no shore is open;
+    - a ground without ponds draws no water.
+- **scene-road-mesh** — the arrays a road chunk hands the GPU, on the
+  ground suite's routes and a road crossing 6 m above another:
+  - **No slivers:** wherever the drawn ground is below an edge that meets
+    it (a verge's outer edge, or the road's own where no verge fits),
+    every 0.5 m, a skirt in the arrays stands there from the edge down to
+    the ground or below. The test reads the skirts back from the arrays.
+  - **No flicker:** segments whose drawn footprints overlap, found by
+    sampling the triangles rather than with the builder's own test, never
+    share a depth layer, and no route needs more than 4.
+  - **Exact joins:** the slice two chunks share has bit-identical road and
+    verge vertices and normals in both.
+  - **Rejoins:** every transition onto an earlier pass starts on its
+    asphalt.
+  - **Moving the origin:** a shifted chunk equals one built at the new
+    origin.
+  - **Crossings:** the upper road has skirts beside the crossing but none
+    over the lower road.
+- **scene-scenery** — trees, bushes, rocks and posts keep clear of the road.
+  On a hairpin, a switchback, out-and-back climbs with legs 1 m and 10 m
+  apart, two passes 10 m apart at different heights and the sample loop, no
+  tree, bush or rock is within 6 m and no post within 4 m of any pass's
+  centre line as ridden, measured by brute force over every segment rather
+  than through the spatial hash the code uses. Every item stands on the
+  drawn surface within 1 mm, read back from what is drawn: the lattice's
+  triangles and every road and verge triangle in the chunk arrays. Placing twice, or in two
+  chunks in either order, gives identical items; repeated slices place
+  nothing; a rebuilt route grows the same scene and a different one does
+  not. A flat road runs through open land or mixed woods and an 8% climb
+  through woods or forest. On 4 km of one kind of land:
+  - conifer forest is at least 70% pine and spruce;
+  - farmland has at most a third of the forest's trees, plus a row of
+    poplars at one distance from the road;
+  - every kind of tree, bush, rock and post grows on some kind of land;
+  - every item's tint is in [0, 1) and differs from the one before.
+
+  On a 30 km meadow road with its ponds, nothing stands within 1 m of the
+  water. Nothing but posts stands in a pond's sight lane (the hull of its
+  water and 60 m of its road either way), where the same road without
+  ponds grows hundreds of items.
+- **scene-ponds** — ponds in hollows of the made-up land. It covers a
+  30 km flat meadow road, three winding 30 km roads, a hairpin, a
+  switchback, an out-and-back and the sample loop.
+  - **How many:** the flat road gets one pond per 1–2.5 km, and six winding
+    roads average the same, every one of them with some. Conifer forest
+    gets some, while rocky upland and a 10% climb get none.
+  - **The road untouched:** no lattice point within 20 m of any pass (by
+    brute force over every segment) differs from the ground without ponds.
+    No water shows within a cell's diagonal of that, and no two ponds are
+    closer than the separation that keeps one's bowl out of the other's
+    shore.
+  - **By the road:** every bowl starts within 24.6 m of a road.
+  - **Seen:** riding up to each pond on the flat road, at least 15% of its
+    water can be seen over the drawn ground from the eye, within the
+    window's ±46° across.
+  - **Shore:** the drawn ground is at least 0.1 m above the water every
+    1 m around every rim, and above it on a 0.5 m grid out to 1 m beyond,
+    where the water polygon's corners lie.
+  - **Bowl:** well inside the bowl, the ground is below the water.
+  - **Repeatability:** the same route gives the same ponds, whatever order
+    the cells are asked in.
+  - **`waterAt`:** gives the level inside the water and nothing just
+    outside it.
+- **scene-landscape** — the kinds of land beside the route.
+  - **Every fixture** (a 20 km flat road, a valley-to-ridge climb, a
+    hairpin, a switchback, an out-and-back and the sample loop):
+    - no stretch of one kind is under 300 m, apart from repeated slices,
+      which take the land of the road they ride;
+    - colour weights sum to 1 and move by at most 0.2 per slice;
+    - every change of kind blends over at least 50 m;
+    - the same route gives the same land.
+  - **What gets chosen:** a 20 km flat road changes kind at least twice,
+    and so does every one of 20 winding flat routes. A ridge 300 m up is
+    heath or upland and the climb to it woods or forest. All eight kinds
+    occur across these routes.
+- **scene-palette** — the 3D view's colours. In every season:
+  - every kind of land, farmland's band, the far tint (low to high),
+    every scenery part and water has a colour in [0, 1];
+  - each kind of land has its own colour;
+  - one kind's weight alone gives exactly its colour, and only farmland
+    shows bands.
+- **scene-climbs** — the 3D view's climb banner, from the ride's elevation:
+  a 2 km climb at 7% after a flat is one climb starting and ending within
+  60 m of where it really does, and 600 m in the banner reads `7%` and
+  `1.4 km`, switching to metres near the top. Flat road, a 2% drag and a
+  route without elevation give none, and two 1 km climbs split by 100 m of
+  descent count as two.
+- **scene-pose** — the view's heading and pitch, stepped at 60 fps at 1×
+  and 16× along the drawn road: through an out-and-back's U-turn, a 20 m
+  radius bend at 40 km/h, a 30% wall at 4× exaggeration and a jump from the
+  way up to the way down, the pitch never passes 45°, the heading moves less
+  than 90° between frames and the pitch stays within 3° of the drawn slope.
+  The U-turn and the bend end facing back the other way, and the U-turn
+  takes at least 1 s of 1× playback. The pose has no roll at all.
+- **scene-camera** — the first-person eye, the only view: no camera modes
+  exist. It sits 1.5 m above the rider, looks 15 m ahead along the heading
+  and tilts by half the road's pitch, never more than 22.5° (so a vertical
+  up vector keeps the horizon level). It stays at least 1 m above flat
+  ground, a hump and a narrow valley, keeping its tilt when lifted; a jump
+  lands at once; through a U-turn it turns less than 90° between frames at
+  1× and 16×; and on a 20% drawn road at 4× it tilts up by half the road's
+  angle.
+- **scene-playback** — simulated riding: 200 W by default, held within
+  80–450 W, still while paused; on a climb after a flat the speed settles,
+  within 2%, at what the ride's own physics gives for 200 W, the rider's and
+  bike's weight from Settings and the ride's own gradient there; 16× and 4×
+  cover 16 and 4 times the distance of 1× within 1%, and a stalled 30 s frame
+  does not fling the rider ahead; playback stops exactly at the finish and
+  Play starts again from 0; a jump sets the distance exactly, within the
+  route.
+- **scene-chunks** — the 3D view only builds what is near the rider. Played
+  through at 16× after opening, a 20 km and a 200 km wandering route both
+  have every chunk and tile within 2.4 km (where the fog ends) built before
+  the rider gets that close, both stay within one fixed bound of 14 chunks
+  and 56 tiles with the 200 km peak within one of the 20 km one, and both
+  open in the same number of frames. After a jump the chunk under the rider
+  is built first and the chunks either side before any tile, and everything
+  at the old place is dropped at once. On the way down an out-and-back the
+  climb's chunk that draws the road under the rider is built, and chunks
+  made only of repeats never are.
+- **route-scene-view** — the Route 3D preview window in jsdom, with a fake
+  renderer that records what it is asked and frames stepped by hand (jsdom has
+  no WebGL). With a ride running, opening, Close and Escape leave its course
+  object, state and trainer target exactly as they were, free the renderer and
+  leave no frame scheduled. There is no camera choice: at 0, 5 and 12 km the
+  eye is 1.5 m above the drawn road right over the rider, looking ahead, and
+  the renderer is told nothing about a rider body. A click on the
+  profile at 15.4 km moves the rider there and the next frame is drawn there,
+  with the ride's own gradient and elevation in the readouts; 600 m into a
+  2 km climb at 7% the banner reads `7%` and `1.4 km to the top`. Play moves
+  the rider; hiding the tab pauses and stops frames, and showing it resumes
+  drawing but not playback. Medium (640 px) is the default, Chunky asks for
+  480 and Fine for 960; heights start at 2.5× and at 1× the rider's point is at
+  true height. Ten opens and closes make and dispose ten renderers with never
+  two alive, and opening another view replaces the open one. A failed load,
+  no WebGL and a lost context each show their message, and Close still
+  closes. A GPX without elevation opens flat with no elevation or gradient
+  value, and a file with one GPS point is refused.
+- **library-scene** — 3D view on the Library's route details, booted with a
+  stand-in catalog, My library on fake IndexedDB and a stand-in renderer.
+  3D view sits next to Ride and Smooth and fetches nothing until pressed. A
+  download failure and a file that does not match the index give Ride's
+  errors and open no window. On a catalog route the file is fetched by its
+  hash key and the window opens over the Library, which stays the current
+  view, and closing returns to it; a My library route makes no network
+  request. Mid-ride, Ride is disabled but 3D view works, and the ride keeps
+  running on its own course throughout. A one-point route never reaches the
+  Library: the catalog refuses it.
 - **route-preview-map** — the smoother's map component through Leaflet under
   jsdom: no Leaflet until a route is set, the route framed whole, a recolour
   that keeps a hand-set view, the hover marker, a line hover near 5 km
@@ -458,4 +674,7 @@
   rider's zones: with Z2 to 78 % a 77 % block turns Z2 in the block list in
   place, and so do the Target and Power stripes. 144 bpm of 185 is HR Z2 with
   Z2 to 78.4 %, and a workout's own FTP of 300 W makes 230 W Z2 and 240 W Z3.
+  Browsing the Library's routes and smoothing a route in Settings never
+  load the 3D view's renderer or open its window (the catalog is a stand-in
+  that is offline, so the test never reaches the real bucket).
   It also fails if anything reaches `console.error`.
