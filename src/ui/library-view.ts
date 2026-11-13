@@ -112,6 +112,8 @@ export class LibraryView {
   private smoothLoadingKey: string | undefined;
   /** the route whose 3D view is being fetched */
   private sceneLoadingKey: string | undefined;
+  /** the 3D view this Library opened, closed when the setting is turned off */
+  private sceneView: { close(): void } | undefined;
 
   constructor(
     private readonly root: HTMLElement,
@@ -144,7 +146,10 @@ export class LibraryView {
     );
 
     session.on('state', () => this.renderRideState());
-    settings.on('change', () => this.renderContent());
+    settings.on('change', () => {
+      if (!settings.current.showRouteScene) { this.sceneView?.close(); this.sceneView = undefined; }
+      this.renderContent();
+    });
     personal?.on('change', () => void this.refreshMine());
     this.renderFilters();
     this.renderStatus();
@@ -547,7 +552,10 @@ export class LibraryView {
     const row = el('div', { class: 'lib-actions' }, item.absent ? [] : [this.rideButton(item.key, () => void this.ride(item, title), true)]);
     // Routes are not workouts: only workouts are marked done.
     if ('title' in item) row.append(this.doneToggle(item.key));
-    else if (!item.absent) row.append(this.smoothButton(item), this.sceneButton(item));
+    else if (!item.absent) {
+      row.append(this.smoothButton(item));
+      if (settings.current.showRouteScene) row.append(this.sceneButton(item));
+    }
     if ('title' in item && !this.canMark) {
       row.append(el('span', { class: 'lib-done-note', text: 'Done marks cannot be saved in this browser.' }));
     }
@@ -859,7 +867,7 @@ export class LibraryView {
    * window's code, and three.js behind it, load only now.
    */
   private async openScene(r: RouteItem): Promise<void> {
-    if (this.sceneLoadingKey !== undefined || !r.fileName) return;
+    if (this.sceneLoadingKey !== undefined || !r.fileName || !settings.current.showRouteScene) return;
     this.sceneLoadingKey = r.key;
     this.renderDetail();
     try {
@@ -870,8 +878,8 @@ export class LibraryView {
       const problem = sceneProblem(track);
       if (problem) throw new Error(problem);
       // The rider may have moved on while the file was on its way.
-      if (this.section !== 'routes' || this.selected.routes !== r.key) return;
-      openRouteScene({ track, name: r.name, loadRenderer: this.sceneRenderer });
+      if (this.section !== 'routes' || this.selected.routes !== r.key || !settings.current.showRouteScene) return;
+      this.sceneView = openRouteScene({ track, name: r.name, loadRenderer: this.sceneRenderer });
     } catch (err) {
       toast(`Could not load "${r.name}": ${(err as Error).message}`, 'error');
     } finally {

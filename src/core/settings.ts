@@ -23,6 +23,8 @@ export interface Settings {
   showSidebar: boolean;
   /** shows diagnostic tools, such as the Bluetooth log download */
   debugMode: boolean;
+  /** offers the Route 3D preview (3D view on Library routes); off hides it */
+  showRouteScene: boolean;
   /** the Route smoother's last parameters, and which preset they came from */
   routeSmoothing: SmoothingParams & { preset: SmoothingPreset };
   /** upload each finished ride to Strava without pressing the button */
@@ -50,6 +52,7 @@ const DEFAULTS: Settings = {
   autoConnectBle: true,
   showSidebar: true,
   debugMode: false,
+  showRouteScene: false,
   routeSmoothing: { ...PRESETS.medium, preset: 'medium' },
   stravaAutoUpload: false,
   librarySection: 'workouts',
@@ -71,6 +74,8 @@ export const DEVICE_SETTINGS = [
   'useMockDevices',
   'autoConnectBle',
   'debugMode',
+  // WebGL and GPU vary by device, so whether to offer 3D does too.
+  'showRouteScene',
   'librarySection',
   'libraryFilters',
   // Strava is connected per browser, so whether to upload to it is too.

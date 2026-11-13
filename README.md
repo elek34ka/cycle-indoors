@@ -74,7 +74,8 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
 - **Route smoother** (Settings, or Smooth on any Library route) takes GPS
   noise and sudden ramps out of the elevation. Choose a preset or set limits,
   compare before and after, then ride the result or download it as `.gpx`.
-- **Route 3D preview** (3D view on any Library route): the route ridden in
+- **Route 3D preview** (off by default: turn on *Route 3D preview* in
+  Settings, then 3D view on any Library route): the route ridden in
   pixelated 3D on simulated power, seen first person from the saddle, with
   climbs, bends and repeated roads drawn once. The land changes along the
   way, between fields, meadow, farmland, woods, forest, heath and rocky upland,
@@ -96,8 +97,8 @@ does not exist in Safari or Firefox, and it only runs over `https` or on
   a reload.
 - **Training plans**: follow one, mark workouts done, and the next undone
   workout is offered as **Up next**.
-- **3D view** on a route's details opens the Route 3D preview in a window of
-  its own. It is a preview: it never changes the ride's course, the session
+- **3D view** on a route's details (shown only with the Route 3D preview
+  setting on) opens the Route 3D preview in a window of its own. It is a preview: it never changes the ride's course, the session
   or the trainer, so it works mid-ride too. Play rides it at 80–450 W through
   the ride's own physics, at 1×, 4× or 16×; click the profile to jump.
 

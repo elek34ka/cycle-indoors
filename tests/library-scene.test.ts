@@ -104,6 +104,20 @@ await settle();
 section('routes').click();
 row(HILLY)!.click();
 
+await suite('3D view is hidden until the setting is on', () => {
+  check('off by default', settings.current.showRouteScene === false);
+  check('no 3D view button, Ride and Smooth still there', sceneButton() === null
+    && rideButton() !== null && detail().querySelector('.lib-smooth') !== null);
+  check('the Settings tab offers it, unticked', (() => {
+    const label = Array.from(doc.querySelectorAll('#view-settings .toggle-row')).find((r) => /Route 3D preview/.test(r.textContent ?? ''));
+    const box = label?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    return box !== undefined && box !== null && !box.checked;
+  })());
+});
+
+settings.patch({ showRouteScene: true });
+await settle();
+
 await suite('route details offer 3D view', () => {
   check('3D view sits next to Ride and Smooth', sceneButton()?.textContent === '3D view'
     && rideButton() !== null && detail().querySelector('.lib-smooth') !== null);
@@ -165,6 +179,16 @@ await suite('mid-ride', () => {
   check('3D view still works', windowOpen());
   check('the ride keeps running on its own course', session.snapshot.state === 'running' && courseStore.current === rideCourse);
   closeWindow();
+});
+
+await press();
+await until(() => windowOpen(), (v) => v);
+settings.patch({ showRouteScene: false });
+await settle();
+
+await suite('turning the setting off', () => {
+  check('closes the open 3D view', !windowOpen() && openRouteSceneView() === undefined);
+  check('and hides the button', sceneButton() === null);
 });
 
 session.finish();
