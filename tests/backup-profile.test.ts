@@ -14,7 +14,7 @@ const PERSONAL = [
   'ftp', 'hrMax', 'riderWeight', 'bikeWeight', 'wheelCircumference', 'smoothPowerSeconds',
   'showMiniMap', 'miniMapFollow', 'showSidebar', 'routeSmoothing', 'powerZoneBounds', 'hrZoneBounds',
 ];
-const DEVICE = ['miniMapPosition', 'useMockDevices', 'autoConnectBle', 'debugMode', 'librarySection', 'libraryFilters', 'stravaAutoUpload'];
+const DEVICE = ['miniMapPosition', 'useMockDevices', 'autoConnectBle', 'debugMode', 'showRouteScene', 'librarySection', 'libraryFilters', 'stravaAutoUpload'];
 const defaults = settings.current as Settings;
 
 suite('which settings travel', () => {

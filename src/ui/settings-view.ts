@@ -20,6 +20,11 @@ const TOGGLES: ToggleSpec[] = [
     label: 'Debug tools',
     hint: 'Records Bluetooth traffic and offers it as a download on the Devices tab, for diagnosing a misbehaving trainer. Off, nothing is recorded.',
   },
+  {
+    key: 'showRouteScene',
+    label: 'Route 3D preview',
+    hint: 'Off by default. Offers 3D view on Library routes. Turning it off closes an open 3D view.',
+  },
 ];
 
 interface FieldSpec {
