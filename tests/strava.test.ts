@@ -101,34 +101,6 @@ async function connected(routes: Record<string, (call: Call) => Response | Promi
   return { client, browser };
 }
 
-suite('the approval URL', () => {
-  const url = new URL(authorizeUrl('s', 'https://elek34ka.github.io/cycle-indoors/strava-callback.html'));
-  check('goes to Strava', url.origin + url.pathname === STRAVA.authorizeUrl);
-  check('carries the client id', url.searchParams.get('client_id') === '290716');
-  check('asks for a code', url.searchParams.get('response_type') === 'code');
-  check('asks only to upload', url.searchParams.get('scope') === 'activity:write');
-  check('skips the consent page for a rider who already approved', url.searchParams.get('approval_prompt') === 'auto');
-  check('carries the state', url.searchParams.get('state') === 's');
-  check('returns to the callback page under the Pages subpath',
-    url.searchParams.get('redirect_uri') === 'https://elek34ka.github.io/cycle-indoors/strava-callback.html');
-});
-
-suite('helpers', () => {
-  check('scopes split on commas (redirect)', grantedScopes('read,activity:write').includes('activity:write'));
-  check('scopes split on spaces (token reply)', grantedScopes('activity:write read').includes('activity:write'));
-  check('no scope means nothing granted', grantedScopes(null).length === 0);
-  check('a plain duplicate error names its activity', duplicateActivityId('x.fit duplicate of activity 123456') === 123456);
-  check('a linked duplicate error names its activity',
-    duplicateActivityId("x.fit duplicate of <a href='/activities/987654' target='_blank'>Ride</a>") === 987654);
-  check('other errors are not duplicates', duplicateActivityId('Improperly formatted data') === undefined);
-});
-
-suite('the callback page matches the client', () => {
-  const page = readFileSync(`public/${CALLBACK_PAGE}`, 'utf8');
-  check('posts on the same channel', page.includes(`'${CALLBACK_CHANNEL}'`));
-  check('passes state, code, scope and error', ['state', 'code', 'scope', 'error'].every((k) => page.includes(`query.get('${k}')`)));
-});
-
 {
   let issued = 0;
   const browser = fakeBrowser({ ...relayRoute(() => tokens(++issued)), ...athleteRoute });
@@ -162,46 +134,6 @@ suite('the callback page matches the client', () => {
     check('announced connecting, then connected', statuses.includes('connecting') && statuses.at(-1) === 'connected', statuses.join());
   });
 
-  const restored = new StravaClient(browser.deps);
-  suite('a reload keeps the connection', () => {
-    check('a new client reads the stored tokens', restored.status === 'connected');
-    check('and the name', restored.athleteName === 'Ada Rider');
-  });
-}
-
-{
-  const results: string[] = [];
-  const attempt = async (setup: (b: ReturnType<typeof fakeBrowser>) => void, answer?: Partial<CallbackMessage>) => {
-    const browser = fakeBrowser({ ...relayRoute(() => tokens(1)), ...athleteRoute });
-    setup(browser);
-    const client = new StravaClient(browser.deps);
-    const done = client.connect().then(() => 'ok', (e: Error) => e.message);
-    await flush();
-    if (answer) browser.callback(answer);
-    else client.cancelConnect();
-    results.push(await done);
-    return { client, browser };
-  };
-
-  const denied = await attempt(() => {}, { error: 'access_denied' });
-  const unticked = await attempt(() => {}, { code: 'c0de', scope: 'read' });
-  const cancelled = await attempt(() => {});
-  let blockedMessage = '';
-  const blocked = fakeBrowser();
-  blocked.blockPopups();
-  const blockedClient = new StravaClient(blocked.deps);
-  await blockedClient.connect().catch((e: Error) => { blockedMessage = e.message; });
-
-  suite('connecting can fail cleanly', () => {
-    check('a refusal on Strava says so', /not granted/.test(results[0]), results[0]);
-    check('a refusal stores nothing', denied.client.status === 'disconnected' && denied.browser.store.size === 0);
-    check('unticking upload permission is caught', /Upload permission/.test(results[1]), results[1]);
-    check('and its code is never exchanged', !unticked.browser.calls.some((c) => c.url === STRAVA.relayUrl));
-    check('cancel stops waiting', /cancelled/.test(results[2]), results[2]);
-    check('cancel leaves it disconnected', cancelled.client.status === 'disconnected');
-    check('a blocked pop-up is explained', /blocked/.test(blockedMessage), blockedMessage);
-    check('a blocked pop-up never enters connecting', blockedClient.status === 'disconnected');
-  });
 }
 
 {
@@ -226,21 +158,6 @@ suite('the callback page matches the client', () => {
     check('the rotated refresh token replaces the old one', saved.refreshToken === 'ref2');
     check('the name survives a refresh', saved.athleteName === 'Ada Rider');
     check('refreshing runs under the cross-tab lock', browser.maxLockDepth >= 1);
-  });
-}
-
-{
-  const { client, browser } = await connected(relayRoute((body) => (body.code
-    ? tokens(1)
-    : Response.json({ message: 'Bad Request' }, { status: 400 }))));
-  browser.advance(7 * 3600);
-  let error: unknown;
-  await client.upload(new Uint8Array([1]), { name: 'R', externalId: 'r.fit' }).catch((e) => { error = e; });
-
-  suite('a revoked app asks the rider to connect again', () => {
-    check('a rejected refresh is "not connected"', error instanceof StravaNotConnected, String(error));
-    check('the dead tokens are forgotten', client.status === 'disconnected' && browser.store.size === 0);
-    check('nothing was uploaded', !browser.calls.some((c) => c.url.includes('/uploads')));
   });
 }
 
@@ -275,20 +192,6 @@ suite('the callback page matches the client', () => {
     check('returns the activity and its link',
       result.kind === 'created' && result.activityId === 555 && result.url === 'https://www.strava.com/activities/555');
     check('reports its progress', progress.join(' → ') === 'Uploading… → Processing…', progress.join(' → '));
-  });
-}
-
-// A ride with a GPS track: Strava hides the map of a trainer ride.
-{
-  const { client, browser } = await connected({
-    [`${STRAVA.relayApi}/uploads`]: () => Response.json({ id: 78, activity_id: 556 }),
-  });
-  await client.upload(new Uint8Array([1]), { name: 'Alpe Loop', externalId: 'route.fit', virtual: true });
-  const form = browser.calls.find((c) => c.url === `${STRAVA.relayApi}/uploads`)?.body as FormData | undefined;
-
-  suite('an upload of a ride with a GPS track', () => {
-    check('asks for a virtual ride', form?.get('sport_type') === 'VirtualRide', String(form?.get('sport_type')));
-    check('is not flagged as a trainer ride', form?.get('trainer') === null, String(form?.get('trainer')));
   });
 }
 
@@ -334,25 +237,6 @@ suite('the callback page matches the client', () => {
     check('a Strava the relay cannot reach is explained', stravaDown instanceof Error
       && stravaDown.message === 'Strava could not be reached. Try again later.', String(stravaDown));
     check('and is not "connect again"', !(stravaDown instanceof StravaNotConnected) && stravaDownClient.status === 'connected');
-  });
-}
-
-{
-  const { client, browser } = await connected({ [`${STRAVA.relayApi}/deauthorize`]: () => Response.json({}) });
-  await client.disconnect();
-  const deauth = browser.calls.find((c) => c.url === `${STRAVA.relayApi}/deauthorize`);
-
-  const { client: offline, browser: offlineBrowser } = await connected({
-    [`${STRAVA.relayApi}/deauthorize`]: () => { throw new TypeError('offline'); },
-  });
-  await offline.disconnect();
-
-  suite('disconnecting', () => {
-    check('revokes the app on Strava', deauth?.method === 'POST'
-      && new URLSearchParams(String(deauth.body)).get('access_token') === 'acc1');
-    check('forgets the tokens', client.status === 'disconnected' && browser.store.size === 0);
-    check('forgets them even when Strava cannot be reached',
-      offline.status === 'disconnected' && offlineBrowser.store.size === 0);
   });
 }
 

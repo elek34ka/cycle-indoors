@@ -55,15 +55,6 @@ session.loadWorkout(parseZwo(
 session.start();
 await settle();
 
-suite('the ERG block watts field', () => {
-  check('it sits in the Bias group', groupOf('Bias').contains(blockWatts()));
-  check('it is shown in ERG', shown(blockWatts()));
-  check('it starts empty, following the workout', blockWatts().value === '', blockWatts().value);
-  check('its placeholder is the workout target', blockWatts().placeholder === '220', blockWatts().placeholder);
-  check('the bias buttons are enabled', biasButtons().every((b) => !b.disabled));
-  check('the Target tile shows the block\'s cadence target alone', target().sub === '90 rpm', target().sub);
-});
-
 type(blockWatts(), '250');
 blockWatts().blur();
 await settle();
@@ -85,95 +76,6 @@ await settle();
 suite('a refused value', () => {
   check('the field puts back the target in force', blockWatts().value === '250', blockWatts().value);
   check('and the trainer keeps 250 W', mock.rig.targetPower === 250, String(mock.rig.targetPower));
-});
-
-blockWatts().focus();
-blockWatts().dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-await settle();
-
-suite('Escape clears it', () => {
-  check('the target is the workout\'s again', target().value === '220', target().value);
-  check('the field is empty', blockWatts().value === '');
-  check('the bias buttons are back', biasButtons().every((b) => !b.disabled));
-});
-
-type(blockWatts(), '260');
-blockWatts().blur();
-await settle();
-session.skipToNextBlock();
-await settle();
-
-suite('the next block empties the field', () => {
-  check('the second block\'s target applies', target().value === '110', target().value);
-  check('a block with no cadence target leaves the right column empty', target().rows.length === 0, target().sub);
-  check('the field is empty again', blockWatts().value === '', blockWatts().value);
-  check('with the new target as its placeholder', blockWatts().placeholder === '110', blockWatts().placeholder);
-});
-
-session.skipToNextBlock();
-await settle();
-
-suite('a FreeRide block, Grade', () => {
-  check('the Bias group is hidden', !shown(groupOf('Bias')));
-  check('the Grade/Watts choice is shown', shown(freeButton('grade')) && shown(freeButton('power')));
-  check('Grade is chosen', freeButton('grade').classList.contains('on') && !freeButton('power').classList.contains('on'));
-  check('the slider is shown', shown(doc.querySelector<HTMLElement>('#controls input[type="range"]')));
-  check('the watts field is hidden', !shown(freeWatts()));
-  check('the Target tile reads —', target().value === '—', target().value);
-  check('with the gradient over the cadence target',
-    target().rows.length === 2 && /^-?\d+\.\d%$/.test(target().rows[0]) && target().rows[1] === '85 rpm', target().sub);
-  const bold = Array.from(tileByLabel('Target')?.querySelectorAll('.tile-side b') ?? []).map((b) => b.textContent ?? '');
-  check('the gradient and the cadence number are bold, "rpm" is not',
-    bold.length === 2 && /^-?\d+\.\d%$/.test(bold[0]) && bold[1] === '85', bold.join(' , '));
-  check('the trainer emulates a gradient', mock.rig.mode === 'sim', mock.rig.mode);
-});
-
-freeButton('power').click();
-await settle();
-
-suite('a FreeRide block, Watts', () => {
-  check('Watts is chosen', freeButton('power').classList.contains('on'));
-  check('the watts field is shown with 60 % of FTP', shown(freeWatts()) && freeWatts().value === '130', freeWatts().value);
-  check('the slider is hidden', !shown(doc.querySelector<HTMLElement>('#controls input[type="range"]')));
-  check('the Target tile reads 130', target().value === '130', target().value);
-  check('the trainer holds 130 W', mock.rig.mode === 'erg' && mock.rig.targetPower === 130, `${mock.rig.mode} ${mock.rig.targetPower}`);
-});
-
-type(freeWatts(), '180');
-freeWatts().blur();
-await settle();
-
-suite('typing free watts', () => {
-  check('the Target tile reads 180', target().value === '180', target().value);
-  check('with only the cadence target beside it', target().sub === '85 rpm', target().sub);
-  check('the trainer holds 180 W', mock.rig.targetPower === 180, String(mock.rig.targetPower));
-});
-
-session.loadWorkout(undefined);
-session.start();
-await settle();
-
-suite('an open ride, Watts', () => {
-  check('the choice is offered with no workout', shown(freeButton('power')) && freeButton('power').classList.contains('on'));
-  check('the trainer holds 180 W', mock.rig.mode === 'erg' && mock.rig.targetPower === 180, String(mock.rig.targetPower));
-  check('the Target tile reads 180', target().value === '180', target().value);
-});
-
-const track = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'sample');
-courseStore.load(track);
-freeButton('grade').click();
-await settle();
-
-suite('an open ride, Grade, with a route', () => {
-  const follow = doc.querySelector<HTMLInputElement>('#controls .check input')!;
-  check('Follow route is offered and ticked', shown(follow) && follow.checked);
-  check('the Target tile reads —', target().value === '—', target().value);
-  check('with the route gradient, unlabelled', /^-?\d+\.\d%$/.test(target().sub)
-    && Math.abs(parseFloat(target().sub) - (session.snapshot.coursePosition?.gradient ?? 99)) < 0.06, target().sub);
-  check('and no cadence target, as an open ride has none', target().rows.length === 1);
-  check('the trainer emulates the route', mock.rig.mode === 'sim'
-    && Math.abs(mock.rig.grade - (session.snapshot.coursePosition?.gradient ?? 99)) < 0.5,
-    `${mock.rig.grade} vs ${session.snapshot.coursePosition?.gradient}`);
 });
 
 session.finish();

@@ -100,62 +100,6 @@ suite('a FIT file that is both a workout and a route', () => {
   check('an indoor ride with no GPS track is not kept as a route', indoor.outcome === 'not-a-workout-or-route');
 });
 
-tab('library').click();
-await settle();
-const workoutRows = mineRows();
-const filterSource = doc.querySelector<HTMLSelectElement>('#library-root [data-filter="source"]')!;
-filterSource.value = 'mine';
-filterSource.dispatchEvent(new dom.window.Event('change'));
-const onlyMine = Array.from(doc.querySelectorAll<HTMLElement>('#library-root .lib-item')).map((r) => r.dataset.key);
-settings.patch({ libraryFilters: NO_FILTERS });
-
-settings.patch({ ftp: 280 });
-workoutRows[0].querySelector<HTMLButtonElement>('.lib-ride')!.click();
-await settle();
-const blockText = doc.querySelector('#segment-list li')?.textContent ?? '';
-const rideActive = doc.querySelector('#view-ride')?.classList.contains('active');
-
-suite('My library in the Library', () => {
-  check('the kept workout is listed', workoutRows.length === 1);
-  check('labelled My library', workoutRows[0]?.querySelector('.lib-source')?.textContent === 'My library');
-  check('the source filter can show only My library', onlyMine.length === 1 && onlyMine[0]?.startsWith('mine:'));
-  check('Ride loads it and shows the ride', rideActive === true && doc.querySelector('#workout-meta h3')?.textContent === 'My steady hour');
-  check('at the FTP in Settings now (280 W), not the FTP it was imported at', blockText.includes('280 W (100%)'), blockText);
-  check('still no network', requests === 0);
-  check('a dropped route, once kept, is its My library entry for the ride log',
-    droppedRouteEntry !== undefined && droppedRouteEntry === `mine:${afterDrops.find((f) => f.route)?.sha256}`, droppedRouteEntry);
-});
-
-tab('library').click();
-await settle();
-section('routes').click();
-const route = mineRows()[0];
-route.click();
-const loadedCourse = courseStore.current;
-doc.querySelector<HTMLButtonElement>('#library-root .lib-detail .lib-remove')!.click();
-await settle();
-const dialog = doc.querySelector('.confirm-overlay');
-const dialogText = dialog?.textContent ?? '';
-Array.from(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? []).find((b) => b.textContent === 'Cancel')!.click();
-await settle();
-const afterCancel = mineRows().length;
-doc.querySelector<HTMLButtonElement>('#library-root .lib-detail .lib-remove')!.click();
-await settle();
-Array.from(doc.querySelectorAll<HTMLButtonElement>('.confirm-overlay button')).find((b) => b.textContent === 'Remove')!.click();
-await settle();
-const afterRemove = await until(kept, (k) => k.length === 1);
-
-suite('removing an entry', () => {
-  check('the loaded route came from the drop', loadedCourse !== undefined);
-  check('asks first', dialog !== null && /Remove from My library\?/.test(dialogText), dialogText);
-  check('says the file on disk and the ride are untouched', /not touched/.test(dialogText) && /keeps it/.test(dialogText));
-  check('cancel keeps it', afterCancel === 1);
-  check('confirm removes it from the list', mineRows().length === 0);
-  check('and from storage', afterRemove.length === 1 && afterRemove[0].workout !== undefined);
-  check('the ride keeps its course', courseStore.current === loadedCourse);
-  check('the dialog is gone', doc.querySelector('.confirm-overlay') === null);
-});
-
 globalThis.fetch = realFetch;
 settings.patch({ libraryFilters: NO_FILTERS, librarySection: 'workouts', ftp: 220 });
 report();

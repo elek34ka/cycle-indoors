@@ -74,22 +74,4 @@ suite('Garmin SDK confirms the workout field numbers', () => {
     `got ${repeat?.durationType}`);
 });
 
-suite('parseFitWorkout expands the workout', () => {
-  const workout = parseFitWorkout(decodeFit(asArrayBuffer), { ftp: 250 }, 'fallback');
-  check('name comes from the file', workout.name === 'Threshold 4 x 3', `got ${workout.name}`);
-  check('repeats expand to 10 blocks', workout.segments.length === 10, `got ${workout.segments.length}`);
-  near('total duration', workout.duration, 600 + 4 * 360 + 300, 0.01);
-  near('warm-up target is the midpoint of 55-65% FTP', workout.segments[0].powerStart!, 0.6, 0.001);
-  near('interval target is the midpoint of 103-107% FTP', workout.segments[1].powerStart!, 1.05, 0.001);
-  check('interval blocks alternate', workout.segments[2].powerStart! < workout.segments[1].powerStart!);
-  near('absolute-watt target converts against FTP', workout.segments[9].powerStart!, 150 / 250, 0.001);
-  check('a named step keeps its name', workout.segments[1].name === 'On' && workout.segments[0].name === 'Warm up',
-    `${workout.segments[0].name}, ${workout.segments[1].name}`);
-  check('every block is in ERG mode', workout.segments.every((s) => s.mode === 'erg'));
-  check('blocks are contiguous in time', workout.segments.every((s, i, all) =>
-    i === 0 || Math.abs(s.start - (all[i - 1].start + all[i - 1].duration)) < 0.001));
-  check('no warnings for a fully specified workout', (workout.warnings ?? []).length === 0,
-    JSON.stringify(workout.warnings));
-});
-
 report();

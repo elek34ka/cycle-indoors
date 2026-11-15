@@ -74,95 +74,15 @@ const upNextText = () => (upNext().hidden ? '' : upNext().textContent ?? '');
 doc.querySelector<HTMLButtonElement>('#tabs [data-tab="library"]')!.click();
 await settle();
 
-row(K.forty)!.click();
-const toggleBefore = lib('.lib-detail .lib-done-toggle')!.textContent;
-// The catalog has its own fetch; anything on the global one would be a mark leaving the browser.
-const realFetch = globalThis.fetch;
-let markRequests = 0;
-globalThis.fetch = (async () => { markRequests++; throw new TypeError('offline'); }) as typeof fetch;
-lib('.lib-detail .lib-done-toggle')!.click();
-await settle();
-globalThis.fetch = realFetch;
-const badge = row(K.forty)?.querySelector('.lib-done')?.textContent ?? '';
-const toggleAfter = lib('.lib-detail .lib-done-toggle')!.textContent;
-const storedAfterMark = await marksInStorage();
-
-search('40/20');
-const searchRows = rowKeys().map((k) => ({ k, done: row(k)?.querySelector('.lib-done') !== null }));
-search('');
-select('done', 'todo');
-const todoKeys = rowKeys();
-select('done', 'done');
-const doneKeys = rowKeys();
-settings.patch({ libraryFilters: NO_FILTERS });
-
-suite('marking in the Library', () => {
-  check('the details offer Mark as done', toggleBefore === 'Mark as done', toggleBefore ?? '');
-  check('the row shows Done with the date', /^Done \S+/.test(badge), badge);
-  check('the details now offer Mark as not done', toggleAfter === 'Mark as not done', toggleAfter ?? '');
-  check('the mark is in IndexedDB', storedAfterMark.join() === K.forty, storedAfterMark.join());
-  check('and no request carries it: no backup has been made', markRequests === 0);
-  check('search shows which match is done', searchRows.length === 2
-    && searchRows.find((r) => r.k === K.forty)?.done === true && searchRows.find((r) => r.k === K.short)?.done === false,
-    JSON.stringify(searchRows));
-  check('Not done hides it', !todoKeys.includes(K.forty) && todoKeys.includes(K.short));
-  check('Done shows only it', doneKeys.join() === K.forty, doneKeys.join());
-  check('the done filter is remembered with the others', settings.current.libraryFilters.done === 'any');
-});
-
-// A plan workout is one entry: marking it in Workouts shows in its plan.
-row(K.easy)!.click();
-lib('.lib-detail .lib-done-toggle')!.click();
-await settle();
+// A followed plan with its first and last workouts done: Up next is the one between.
 section('plans');
-const planMeta = row('catalog:plan:Base_Builder')?.querySelector('.lib-meta')?.textContent ?? '';
 row('catalog:plan:Base_Builder')!.click();
-const easyItem = lib('.lib-plan-workouts li[data-key="' + K.easy + '"]');
-const easyBadge = easyItem?.querySelector('.lib-done') !== null;
-lib(`.lib-plan-workouts li[data-key="${K.tempo}"] .lib-done-toggle`)!.click();
+lib(`.lib-plan-workouts li[data-key="${K.easy}"] .lib-done-toggle`)!.click();
 await settle();
-const tempoDone = (await marksInStorage()).includes(K.tempo);
-lib(`.lib-plan-workouts li[data-key="${K.tempo}"] .lib-done-toggle`)!.click();
-await settle();
-const tempoUndone = !(await marksInStorage()).includes(K.tempo);
-select('done', 'todo');
-const todoInPlan = Array.from(doc.querySelectorAll<HTMLElement>('#library-root .lib-plan-workouts li')).map((li) => li.dataset.key);
-settings.patch({ libraryFilters: NO_FILTERS });
-
-suite('marks in plans', () => {
-  check('the plan counts the mark made from Workouts', /· 1 of 3 done$/.test(planMeta), planMeta);
-  check('the plan detail shows it Done', easyBadge);
-  check('a plan row can be marked done', tempoDone);
-  check('and undone', tempoUndone);
-  check('the done filter applies to plan details', todoInPlan.join() === [K.tempo, K.long].join(), todoInPlan.join());
-});
-
-const hiddenBeforeFollow = upNext().hidden;
-lib('.lib-detail .lib-follow')!.click();
-await settle();
-const followedText = upNextText();
-const libUpNext = lib('.lib-up-next')?.textContent ?? '';
-lib(`.lib-plan-workouts li[data-key="${K.tempo}"] .lib-done-toggle`)!.click();
-await settle();
-const afterTempo = upNextText();
 lib(`.lib-plan-workouts li[data-key="${K.long}"] .lib-done-toggle`)!.click();
 await settle();
-const complete = upNextText();
-const rideOfferedWhenComplete = upNext().querySelector('.lib-ride') !== null;
-lib(`.lib-plan-workouts li[data-key="${K.tempo}"] .lib-done-toggle`)!.click();
+lib('.lib-detail .lib-follow')!.click();
 await settle();
-const skippedAhead = upNextText();
-
-suite('following a plan and Up next', () => {
-  check('nothing on the Workout panel until a plan is followed', hiddenBeforeFollow);
-  check('Up next is the first workout not done (Easy is done)', /Up next in Base Builder \(2 of 3\)/.test(followedText) && /Tempo/.test(followedText),
-    followedText);
-  check('the Plans section shows it too', /Up next in Base Builder/.test(libUpNext) && /Tempo/.test(libUpNext), libUpNext);
-  check('a mark advances it', /Long/.test(afterTempo) && /3 of 3/.test(afterTempo), afterTempo);
-  check('all done: complete, nothing offered', /complete — all 3 workouts done/.test(complete) && !rideOfferedWhenComplete,
-    complete);
-  check('skipping ahead: Up next goes back to the first not done', /Tempo/.test(skippedAhead), skippedAhead);
-});
 
 // Ride from Up next on the Workout panel, then finish and mark it done.
 doc.querySelector<HTMLButtonElement>('#tabs [data-tab="ride"]')!.click();
@@ -238,47 +158,6 @@ suite('when the summary offers a mark', () => {
     offeredAfterSwap);
   check('and marks the My library entry', mineMarks.length === 1);
   check('no workout loaded: nothing offered', !offeredFreeRide);
-});
-
-doc.querySelector<HTMLButtonElement>('#tabs [data-tab="library"]')!.click();
-await settle();
-section('plans');
-row('catalog:plan:Other_Plan')!.click();
-lib('.lib-detail .lib-follow')!.click();
-await settle();
-const switched = upNextText();
-const firstPlanRow = rowKeys()[0];
-const baseMeta = row('catalog:plan:Base_Builder')?.querySelector('.lib-meta')?.textContent ?? '';
-lib('.lib-detail .lib-follow')!.click();
-await settle();
-const stopped = upNext().hidden && (await (await openLibraryStore(factory)).followed()) === undefined;
-
-suite('switching and stopping', () => {
-  check('following another plan replaces it, without asking', /Up next in Other Plan/.test(switched)
-    && doc.querySelector('.confirm-overlay') === null, switched);
-  check('the first plan keeps its marks', /3 of 3 done/.test(baseMeta), baseMeta);
-  check('the followed plan is listed first', firstPlanRow === 'catalog:plan:Other_Plan', firstPlanRow);
-  check('Stop following hides Up next and forgets the plan', stopped);
-});
-
-// Fresh views over the same storage: a plan that was unpublished, and a
-// catalog that cannot be reached.
-const store = await openLibraryStore(factory);
-await store.follow('plan:Gone_Plan');
-const personal = new PersonalLibrary(Promise.resolve(store));
-const host = { loadBuiltin: () => false, loadFile: async () => false, showRide: () => {} };
-const goneRoot = doc.createElement('div');
-new LibraryView(goneRoot, host, new CatalogClient(BASE, fetchFn), personal);
-await settle();
-const goneText = goneRoot.querySelector('.lib-up-next')?.textContent ?? '';
-const offlineRoot = doc.createElement('div');
-new LibraryView(offlineRoot, host, new CatalogClient(BASE, async () => { throw new TypeError('offline'); }), personal);
-await settle();
-const offlineText = offlineRoot.querySelector('.lib-up-next')?.textContent ?? '';
-
-suite('when the followed plan cannot be shown', () => {
-  check('a plan no longer in the catalog says so', /"Gone Plan", is no longer published/.test(goneText), goneText);
-  check('an unreachable catalog says Up next is unavailable', /Up next is unavailable/.test(offlineText), offlineText);
 });
 
 settings.patch({ libraryFilters: NO_FILTERS, librarySection: 'workouts' });

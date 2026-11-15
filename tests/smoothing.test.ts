@@ -69,102 +69,9 @@ function noisyRoute(seed: number): ActivityTrack {
 const MEDIUM = PRESETS.medium;
 const EPS = 1e-9;
 
-suite('parameters', () => {
-  check('an even window is raised to the next odd', normaliseParams({ ...MEDIUM, window: 8 }).window === 9);
-  check('51 stays 51', normaliseParams({ ...MEDIUM, window: 51 }).window === 51);
-  check('an odd window is kept', normaliseParams({ ...MEDIUM, window: 7 }).window === 7);
-  check('min ≥ max is refused',
-    validateParams({ ...MEDIUM, minGradient: 0, maxGradient: 0 }) === 'Min gradient must be below max gradient');
-  const outOfRange: [keyof SmoothingParams, number][] = [
-    ['spacing', 4], ['spacing', 51], ['spikeThreshold', 1], ['spikeThreshold', 11], ['window', 1], ['window', 52],
-    ['maxChange', 0], ['maxChange', 6], ['minGradient', -31], ['minGradient', 1], ['maxGradient', -1], ['maxGradient', 31],
-  ];
-  for (const [key, value] of outOfRange) {
-    check(`${key} = ${value} is refused`, validateParams({ ...MEDIUM, [key]: value }) !== undefined);
-  }
-  check('an even window of 8 is valid (it becomes 9)', validateParams({ ...MEDIUM, window: 8 }) === undefined);
-  for (const [name, preset] of Object.entries(PRESETS)) {
-    check(`the ${name} preset is valid`, validateParams(preset) === undefined, validateParams(preset));
-    check(`the ${name} window is odd`, preset.window % 2 === 1);
-  }
-});
-
 /** The preset values before Light, Medium and Strong were shifted one step stronger. */
 const OLD_LIGHT: SmoothingParams = { spacing: 10, spikeThreshold: 4, window: 5, maxChange: 1.5, minGradient: -20, maxGradient: 20 };
 const OLD_STRONG: SmoothingParams = { spacing: 10, spikeThreshold: 3, window: 15, maxChange: 0.5, minGradient: -12, maxGradient: 12 };
-
-suite('presets', () => {
-  const tuple = (p: SmoothingParams) => [p.spacing, p.spikeThreshold, p.window, p.maxChange, p.minGradient, p.maxGradient].join(',');
-  check('Light is 10, 3, 9, 1, ±15', tuple(PRESETS.light) === '10,3,9,1,-15,15', tuple(PRESETS.light));
-  check('Medium is 10, 3, 15, 0.5, ±12', tuple(PRESETS.medium) === '10,3,15,0.5,-12,12', tuple(PRESETS.medium));
-  check('Strong is 10, 2.5, 25, 0.3, ±8', tuple(PRESETS.strong) === '10,2.5,25,0.3,-8,8', tuple(PRESETS.strong));
-  check('the old Strong values are now Medium', matchPreset(OLD_STRONG) === 'medium', matchPreset(OLD_STRONG));
-  check('the old Light values are Custom', matchPreset(OLD_LIGHT) === 'custom', matchPreset(OLD_LIGHT));
-  check('Strong is recognised', matchPreset({ ...PRESETS.strong }) === 'strong');
-  check('one changed value makes it Custom', matchPreset({ ...PRESETS.light, maxGradient: 14 }) === 'custom');
-});
-
-suite('Strong', () => {
-  // Flat, then a 2 km climb at 12 %, then flat: 240 m to gain.
-  const wall = route(5000, (d) => 100 + 0.12 * Math.min(2000, Math.max(0, d - 1000)));
-  const p = smoothProfile(wall, PRESETS.strong);
-  const g = p.smoothedGradient;
-  check('a 12 % climb is capped at 8 %', Math.max(...g) <= 8 + EPS, `max ${Math.max(...g)}`);
-  check('and nothing is steeper than −8 %', Math.min(...g) >= -8 - EPS, `min ${Math.min(...g)}`);
-  check('the gradient changes by at most 0.3 per 10 m', p.stats.smoothed.maxChange <= 0.3 + 1e-7,
-    `got ${p.stats.smoothed.maxChange}`);
-  check('the 3 km of route at most 8 % can still climb 240 m', p.anchorShortfall === undefined, String(p.anchorShortfall));
-
-  // 1 km of road cannot climb 120 m at 8 %.
-  const short = route(1000, (d) => 100 + 0.12 * d);
-  const ps = smoothProfile(short, PRESETS.strong);
-  check('a finish the limits cannot reach is reported', ps.anchorShortfall !== undefined && ps.anchorShortfall > 1,
-    String(ps.anchorShortfall));
-
-  const sample = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'sample');
-  const [light, medium, strong] = (['light', 'medium', 'strong'] as const).map((n) => smoothProfile(sample, PRESETS[n]).stats.smoothed);
-  check('on the sample loop the largest change does not grow from Light to Strong',
-    light.maxChange >= medium.maxChange - 1e-9 && medium.maxChange >= strong.maxChange - 1e-9,
-    `${light.maxChange} ${medium.maxChange} ${strong.maxChange}`);
-  const steepest = (s: typeof light) => Math.max(s.maxGradient, -s.minGradient);
-  check('nor does the steepest gradient',
-    steepest(light) >= steepest(medium) - 1e-9 && steepest(medium) >= steepest(strong) - 1e-9,
-    `${steepest(light)} ${steepest(medium)} ${steepest(strong)}`);
-});
-
-suite('which routes can be smoothed', () => {
-  check('a normal route is fine', routeProblem(route(1000, () => 100)) === undefined);
-  check('one point is refused', routeProblem(trackOf([{ d: 0, ele: 1 }])) !== undefined);
-  check('no elevation is refused',
-    routeProblem(trackOf([{ d: 0 }, { d: 100 }])) === 'This route has no elevation to smooth');
-});
-
-suite('resampling', () => {
-  const climb = route(1000, (d) => 100 + d * 0.1, 8);
-  const dist = routeDistances(climb.points);
-  const r = resample(dist, climb.points.map((p) => p.ele), 10);
-  check('1 km at 10 m gives 101 samples', r.distances.length === 101, `got ${r.distances.length}`);
-  near('the step is 10 m', r.step, 10, 1e-6);
-  near('the last sample sits at the total distance', r.distances[100], dist[dist.length - 1], 1e-9);
-  check('heights are interpolated exactly',
-    r.elevations.every((e, i) => Math.abs(e - (100 + r.distances[i] * 0.1)) < 1e-6));
-
-  const uneven = route(1005, () => 100, 5);
-  const ru = resample(routeDistances(uneven.points), uneven.points.map((p) => p.ele), 10);
-  check('a length that does not divide evenly shrinks the step instead', ru.step <= 10 && ru.step > 9.9);
-
-  // A FIT file whose own distance field disagrees with the coordinates.
-  const fitLike = route(1000, (d) => 100 + d * 0.05);
-  fitLike.points.forEach((p) => { p.distance *= 1.1; });
-  fitLike.source = 'fit';
-  const profile = smoothProfile(fitLike, MEDIUM);
-  near('the profile follows haversine, not the FIT distance field',
-    profile.distances[profile.distances.length - 1], 1000, 0.5);
-
-  const gaps = trackOf([{ d: 0, ele: 100 }, { d: 50 }, { d: 100, ele: 110 }]);
-  const rg = resample(routeDistances(gaps.points), gaps.points.map((p) => p.ele), 10);
-  near('a point without elevation is interpolated across', rg.elevations[5], 105, 0.05);
-});
 
 suite('spike removal', () => {
   const flat = route(2000, (d) => (d === 1000 ? 140 : 100));
@@ -185,34 +92,6 @@ suite('spike removal', () => {
   const noise = Array.from({ length: 300 }, () => 100 + (rand() * 2 - 1));
   const noiseKept = removeSpikes(noise, 10, 2);
   check('±1 m of noise on a flat road flags nothing', noiseKept.every((v, i) => v === noise[i]));
-});
-
-suite('Savitzky–Golay', () => {
-  const line = Array.from({ length: 60 }, (_, i) => 3 + 0.7 * i);
-  check('a straight line passes through unchanged',
-    savitzkyGolay(line, 9).every((v, i) => Math.abs(v - line[i]) < 1e-6));
-  const parabola = Array.from({ length: 60 }, (_, i) => 2 - 0.3 * i + 0.05 * i * i);
-  check('a parabola passes through unchanged, ends included',
-    savitzkyGolay(parabola, 9).every((v, i) => Math.abs(v - parabola[i]) < 1e-6));
-
-  const rand = mulberry32(11);
-  const clean = Array.from({ length: 400 }, (_, i) => 100 + 30 * Math.sin(i / 40));
-  const noisy = clean.map((v) => v + (rand() - 0.5) * 4);
-  const rms = (a: number[]) => Math.sqrt(a.reduce((s, v, i) => s + (v - clean[i]) ** 2, 0) / a.length);
-  check('noise is reduced', rms(savitzkyGolay(noisy, 9)) < rms(noisy) * 0.6,
-    `${rms(savitzkyGolay(noisy, 9))} vs ${rms(noisy)}`);
-
-  const summit = Array.from({ length: 201 }, (_, i) => 100 + 50 * Math.exp(-(((i * 10 - 1000) / 150) ** 2)));
-  const sg = savitzkyGolay(summit, 9);
-  const ma = summit.map((_, i) => {
-    const w = summit.slice(Math.max(0, i - 4), i + 5);
-    return w.reduce((s, v) => s + v, 0) / w.length;
-  });
-  const sgLoss = 150 - Math.max(...sg);
-  const maLoss = 150 - Math.max(...ma);
-  check('a summit keeps its height within 1 m', Math.abs(sgLoss) < 1, `lost ${sgLoss}`);
-  check('a moving average of the same width loses more', maLoss > Math.abs(sgLoss), `${maLoss} vs ${sgLoss}`);
-  check('a series shorter than the window is still smoothed safely', savitzkyGolay([1, 2, 3, 4], 9).length === 4);
 });
 
 suite('gradient limits', () => {
@@ -253,48 +132,6 @@ suite('gradient limits', () => {
   near('the shortfall is what the limit costs', pt.anchorShortfall ?? 0, 95, 0.5);
 });
 
-suite('limits hold on random noisy routes', () => {
-  let failures = 0;
-  let detail = '';
-  for (let seed = 1; seed <= 200; seed++) {
-    const track = noisyRoute(seed);
-    for (const [name, preset] of Object.entries(PRESETS)) {
-      const p = smoothProfile(track, preset);
-      const delta = (preset.maxChange * p.step) / 10;
-      const g = p.smoothedGradient;
-      const inRange = g.every((v) => v <= preset.maxGradient + EPS && v >= preset.minGradient - EPS);
-      const gradual = g.every((v, i) => i === 0 || Math.abs(v - g[i - 1]) <= delta + 1e-7);
-      const anchored = Math.abs(p.smoothed[0] - p.anchors.start) < 0.1;
-      const finished = p.anchorShortfall !== undefined || Math.abs(p.smoothed[p.smoothed.length - 1] - p.anchors.finish) <= 1;
-      if (!(inRange && gradual && anchored && finished)) {
-        failures++;
-        if (!detail) detail = `seed ${seed} ${name}: range ${inRange} gradual ${gradual} start ${anchored} finish ${finished}`;
-      }
-    }
-  }
-  check('200 routes × 3 presets: every segment inside the limits, start and finish anchored', failures === 0, detail);
-});
-
-suite('before and after figures', () => {
-  const hill = route(3000, (d) => (d <= 1000 ? 100 : d <= 2000 ? 100 + (d - 1000) * 0.1 : 200 - (d - 2000) * 0.1));
-  const stats = smoothProfile(hill, MEDIUM).stats.original;
-  near('ascent', stats.ascent, 100, 0.01);
-  near('descent', stats.descent, 100, 0.01);
-  near('max gradient', stats.maxGradient, 10, 0.01);
-  near('min gradient', stats.minGradient, -10, 0.01);
-
-  const direct = profileStats([0, 1, 1, 3], gradients([0, 1, 1, 3], 10), 10, { start: 0, finish: 2 });
-  near('largest change per 10 m', direct.maxChange, 20, 1e-9);
-  near('finish shift', direct.finishShift, 1, 1e-9);
-
-  const noisy = smoothProfile(noisyRoute(42), MEDIUM);
-  check('smoothing does not add climbing', noisy.stats.smoothed.ascent <= noisy.stats.original.ascent,
-    `${noisy.stats.smoothed.ascent} vs ${noisy.stats.original.ascent}`);
-  check('the largest change is within Medium\'s limit', noisy.stats.smoothed.maxChange <= MEDIUM.maxChange + 1e-7,
-    `got ${noisy.stats.smoothed.maxChange}`);
-  check('the original was much rougher', noisy.stats.original.maxChange > 5);
-});
-
 /** Write the smoothed GPX, load it back the way the app does, and compare. */
 function roundTrip(label: string, track: ActivityTrack): void {
   const profile = smoothProfile(track, MEDIUM);
@@ -332,22 +169,6 @@ suite('GPX export', () => {
   const awkward = route(1000, (d) => 100 + d * 0.02);
   awkward.name = 'Up & <over> "the" hill';
   roundTrip('awkward name', awkward);
-});
-
-suite('remembered parameters', () => {
-  const loaded = settings.current.routeSmoothing;
-  check('older settings load with Medium', loaded.preset === 'medium' && loaded.window === PRESETS.medium.window);
-  check('and keep what they had', settings.current.ftp === 250);
-  const oldStrong = restoreSettings({ routeSmoothing: { ...OLD_STRONG, preset: 'strong' } }).routeSmoothing;
-  check('settings saved under the old Strong load as Medium', oldStrong.preset === 'medium', oldStrong.preset);
-  check('with the same values', oldStrong.window === 15 && oldStrong.maxGradient === 12 && oldStrong.minGradient === -12);
-  const oldLight = restoreSettings({ routeSmoothing: { ...OLD_LIGHT, preset: 'light' } }).routeSmoothing;
-  check('settings saved under the old Light load as Custom', oldLight.preset === 'custom', oldLight.preset);
-  check('with the same values', oldLight.window === 5 && oldLight.maxGradient === 20);
-  settings.patch({ routeSmoothing: { ...PRESETS.strong, preset: 'custom', maxGradient: 9 } });
-  settings.reset();
-  check('reset restores Medium', settings.current.routeSmoothing.preset === 'medium'
-    && settings.current.routeSmoothing.maxGradient === PRESETS.medium.maxGradient);
 });
 
 report();

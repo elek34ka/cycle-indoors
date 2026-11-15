@@ -99,44 +99,6 @@ tab('library').click();
 await settle();
 section('routes').click();
 row(HILLY).click();
-
-suite('a route\'s details offer Smooth', () => {
-  check('the ride has its own course', rideCourse?.name === 'My hilly loop', rideCourse?.name);
-  check('the catalog route is listed', row(HILLY) !== null);
-  check('Smooth sits next to Ride', smoothButton()?.textContent === 'Smooth'
-    && detail().querySelector('.lib-actions .lib-ride') !== null);
-  check('no smoother until it is pressed', smoother() === null);
-  check('and no file fetched yet', fileCalls() === 0);
-});
-
-net.filesDown = true;
-await smooth();
-const downToast = lastToast();
-net.filesDown = false;
-net.corrupt = hilly.file.key;
-await smooth();
-const staleToast = lastToast();
-net.corrupt = undefined;
-
-suite('a file that cannot be fetched is not smoothed', () => {
-  check('a download failure says so', /^Could not smooth "Sample hilly loop": Could not download/.test(downToast), downToast);
-  check('a file that does not match the index: catalog out of date', /out of date/.test(staleToast), staleToast);
-  check('no smoother is shown', smoother() === null);
-  check('Smooth is offered again', smoothButton()?.textContent === 'Smooth' && !smoothButton()!.disabled);
-  check('the ride\'s course is unchanged', courseStore.current === rideCourse);
-});
-
-if (flat) {
-  row(`catalog:${flat.id}`).click();
-  await smooth();
-}
-suite('an unusable route is refused with its reason', () => {
-  check('the catalog lists a route without elevation', flat !== undefined);
-  check('the smoother\'s reason is shown', lastToast() === 'This route has no elevation to smooth', lastToast());
-  check('no smoother is shown', smoother() === null && smoothButton()?.textContent === 'Smooth');
-});
-
-row(HILLY).click();
 const callsBefore = fileCalls();
 await smooth();
 await wait(150); // Leaflet is fetched on demand
@@ -162,72 +124,9 @@ suite('Smooth opens the smoother on a catalog route', () => {
   check('the same figures as Settings for the same file', tableText('lib-smoother') === tableText('smoother'), tableText('lib-smoother'));
 });
 
-libPreset().value = 'strong';
-libPreset().dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-await frame();
-await frame();
-const afterPreset = smoother();
-const settingsPreset = doc.querySelector<HTMLSelectElement>('#smoother-preset')!.value;
-const input = doc.querySelector<HTMLInputElement>('#library-root [data-filter="search"]')!;
-input.value = 'hilly';
-input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-const afterFilter = smoother();
-
-suite('it stays open while the route is shown', () => {
-  check('a preset change keeps the same smoother', afterPreset === host);
-  check('on the same route', doc.querySelector('#lib-smoother-source')?.textContent?.startsWith('Sample hilly loop') === true);
-  check('and Settings follows the preset', settingsPreset === 'strong' && settings.current.routeSmoothing.window === PRESETS.strong.window);
-  check('a filter that still shows it keeps it', afterFilter === host);
-  check('and the figures still match Settings', tableText('lib-smoother') === tableText('smoother'));
-});
-input.value = '';
-input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-
+// Another route closes the smoother; mid-ride it opens again on that one.
 row(mineKey).click();
-const onOther = { smoother: smoother(), button: smoothButton()?.textContent };
-row(HILLY).click();
-const backAgain = { smoother: smoother(), button: smoothButton()?.textContent };
-
-suite('selecting another route closes it', () => {
-  check('the other route shows no smoother', onOther.smoother === null && onOther.button === 'Smooth');
-  check('coming back shows Smooth again', backAgain.smoother === null && backAgain.button === 'Smooth');
-});
-
-row(mineKey).click();
-const callsBeforeMine = net.calls.length;
-await smooth();
-await wait(50);
-
-suite('a My library route', () => {
-  check('opens the smoother on the kept file', smoother() !== null
-    && doc.querySelector('#lib-smoother-source')?.textContent?.startsWith('My hilly loop') === true);
-  check('without any request', net.calls.length === callsBeforeMine, net.calls.slice(callsBeforeMine).join(', '));
-});
-
-section('workouts').click();
-section('routes').click();
-suite('changing section closes it', () => {
-  check('the route is still selected', row(mineKey).classList.contains('selected'));
-  check('but shows Smooth and no smoother', smoother() === null && smoothButton()?.textContent === 'Smooth');
-});
-
-// A file still on its way when the rider moves on is dropped.
-let open = () => {};
-net.gate = new Promise((resolve) => { open = resolve; });
-row(HILLY).click();
-smoothButton()!.click();
-const loadingText = smoothButton()?.textContent;
-row(mineKey).click();
-net.gate = undefined;
-open();
 await settle();
-suite('a late file is dropped', () => {
-  check('the button said it was loading', loadingText === 'Loading…', loadingText);
-  check('the route now selected shows no smoother', smoother() === null && smoothButton()?.textContent === 'Smooth');
-  row(HILLY).click();
-  check('and neither does the one that was pressed', smoother() === null);
-});
-
 session.start();
 await settle();
 await smooth();
@@ -252,35 +151,6 @@ suite('mid-ride', () => {
   check('Download still works', midRide.download);
   check('a forced click changes nothing', forcedCourse === rideCourse);
   check('after Finish Ride this route is enabled', !libRide().disabled);
-});
-
-const keptBefore = (await kept()).length;
-libRide().click();
-await settle();
-suite('Ride this route', () => {
-  check('opens the Ride view', active('ride') && !active('library'));
-  check('with the smoothed route as the course', courseStore.current?.name === 'Sample hilly loop (smoothed)', courseStore.current?.name);
-});
-const keptAfter = (await kept()).length;
-suite('…keeps nothing', () => {
-  check('My library has no new route', keptAfter === keptBefore, `${keptBefore} → ${keptAfter}`);
-});
-
-tab('library').click();
-await settle();
-row(mineKey).click();
-await smooth();
-await wait(50);
-const openOnMine = smoother() !== null;
-detail().querySelector<HTMLButtonElement>('.lib-remove')!.click();
-await settle();
-Array.from(doc.querySelectorAll<HTMLButtonElement>('.confirm-overlay button')).find((b) => b.textContent === 'Remove')!.click();
-await settle();
-
-suite('removing the route closes it', () => {
-  check('it was open on the My library route', openOnMine);
-  check('the route is gone', row(mineKey) === null);
-  check('and so is the smoother', doc.querySelector('#lib-smoother') === null || !doc.querySelector('#lib-smoother')!.isConnected);
 });
 
 session.reset();

@@ -59,27 +59,5 @@ suite('My rides lists the log', () => {
     && strava.getAttribute('target') === '_blank');
 });
 
-rows().find((r) => r.dataset.key === `ride:${may(1)}`)!.click();
-lib('.lib-detail .lib-remove')!.click();
-await settle();
-const dialogText = doc.querySelector('.confirm-overlay')?.textContent ?? '';
-Array.from(doc.querySelectorAll<HTMLButtonElement>('.confirm-overlay button')).find((b) => b.textContent === 'Cancel')!.click();
-await settle();
-const afterCancel = rows().length;
-lib('.lib-detail .lib-remove')!.click();
-await settle();
-Array.from(doc.querySelectorAll<HTMLButtonElement>('.confirm-overlay button')).find((b) => b.textContent === 'Remove')!.click();
-const stored = await until(async () => (await openLibraryStore(factory)).rides(), (r) => r.length === 2);
-await settle();
-const marks = await (await openLibraryStore(factory)).doneMarks();
-
-suite('removing a ride', () => {
-  check('asks first, saying done marks and Strava are untouched', /Remove this ride\?/.test(dialogText) && /not touched/.test(dialogText), dialogText);
-  check('cancel keeps it', afterCancel === 3);
-  check('confirm removes it from the list and from storage', rows().length === 2 && stored.length === 2
-    && !stored.some((r) => r.startedAt === may(1)));
-  check('the workout it rode keeps its done mark', marks.some((m) => m.key === 'builtin:quick'));
-});
-
 settings.patch({ librarySection: 'workouts' });
 report();

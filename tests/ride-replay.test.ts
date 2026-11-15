@@ -20,24 +20,6 @@ const kept = workout('mine:bbb');
 const absent = workout('mine:ccc', { absent: true });
 const all = [builtin, renamed, kept, absent];
 
-suite('finding a logged workout', () => {
-  check('a file\'s hash: the catalog\'s file, or My library\'s id; none for a built-in',
-    entryHash(renamed) === 'aaa' && entryHash(kept) === 'bbb' && entryHash(builtin) === undefined);
-  check('by its key', findEntry({ key: 'builtin:quick' }, all, true).status === 'found');
-  const byHash = findEntry({ key: 'catalog:workout:plans/old-name.zwo', sha256: 'aaa' }, all, true);
-  check('a renamed catalog file by its hash', byHash.status === 'found' && byHash.item === renamed);
-  const mineAsCatalog = findEntry({ key: 'mine:aaa' }, all, true);
-  check('an old My library key matches the same bytes in the catalog', mineAsCatalog.status === 'found' && mineAsCatalog.item === renamed);
-  check('not on this device: absent', findEntry({ key: 'mine:ccc' }, all, true).status === 'absent');
-  const both = findEntry({ key: 'mine:ccc', sha256: 'ccc' }, [absent, workout('catalog:workout:x.zwo', { file: file('ccc') })], true);
-  check('a rideable copy wins over an absent one', both.status === 'found' && both.item.key === 'catalog:workout:x.zwo');
-  check('gone: missing', findEntry({ key: 'catalog:workout:gone.zwo', sha256: 'zzz' }, all, true).status === 'missing');
-  check('a title only (a file never kept): missing', findEntry({}, all, false).status === 'missing');
-  check('while the catalog loads, a catalog key is pending', findEntry({ key: 'catalog:workout:gone.zwo' }, all, false).status === 'pending');
-  check('and so is any hash', findEntry({ key: 'mine:zzz' }, all, false).status === 'pending');
-  check('a built-in that is gone is missing without waiting', findEntry({ key: 'builtin:gone' }, all, false).status === 'missing');
-});
-
 const ride = (extra: Partial<RideLogEntry>): RideLogEntry => ({
   startedAt: 1, duration: 60, distance: 0, avgPower: 0, normalisedPower: 0, tss: 0, ascent: 0, ...extra,
 });

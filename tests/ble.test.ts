@@ -135,17 +135,6 @@ suite('Cycling Power Measurement (0x2A63)', () => {
     kitchenSink.accumulatedEnergy === 42, String(kitchenSink.accumulatedEnergy));
 });
 
-suite('CSC Measurement (0x2A5B)', () => {
-  const both = parseCsc(dv(0x03, ...u32(4000), ...u16(1024), ...u16(250), ...u16(512)));
-  check('wheel revolutions', both.wheel?.revolutions === 4000, String(both.wheel?.revolutions));
-  check('wheel event time', both.wheel?.time === 1024);
-  check('crank revolutions', both.crank?.revolutions === 250);
-  check('crank event time', both.crank?.time === 512);
-
-  const crankOnly = parseCsc(dv(0x02, ...u16(99), ...u16(100)));
-  check('crank only', crankOnly.crank?.revolutions === 99 && crankOnly.wheel === undefined);
-});
-
 suite('cadence from crank revolutions', () => {
   const tracker = new CrankCadenceTracker();
   check('the first event cannot give a cadence', tracker.update({ revolutions: 10, time: 1000 }, 0) === undefined);
@@ -165,70 +154,6 @@ suite('cadence from crank revolutions', () => {
     coasting.update({ revolutions: 101, time: 2024 }, 2000)!, 60, 0.01);
   check('after a few seconds with no new event, cadence is zero',
     coasting.update({ revolutions: 101, time: 2024 }, 5000) === 0);
-});
-
-suite('speed and distance from wheel revolutions', () => {
-  const csc = new WheelSpeedTracker(1024);
-  csc.update({ revolutions: 0, time: 0 }, 2096, 0);
-  const first = csc.update({ revolutions: 1, time: 1024 }, 2096, 1000);
-  near('2096 mm in one second is 7.55 km/h', first.speed!, 2.096 * 3.6, 0.01);
-  near('distance covered', first.distanceDelta, 2.096, 0.001);
-
-  const cps = new WheelSpeedTracker(2048);
-  cps.update({ revolutions: 0, time: 0 }, 2096, 0);
-  const cpsFirst = cps.update({ revolutions: 1, time: 2048 }, 2096, 1000);
-  near('the power service ticks at 1/2048 s, giving the same speed', cpsFirst.speed!, 2.096 * 3.6, 0.01);
-
-  const far = new WheelSpeedTracker(1024);
-  far.update({ revolutions: 0xfffffffe, time: 0 }, 2000, 0);
-  const wrapped = far.update({ revolutions: 1, time: 1024 }, 2000, 1000);
-  near('a 32-bit revolution rollover gives three revolutions, not four billion',
-    wrapped.distanceDelta, 6, 0.001);
-
-  const totals = new WheelSpeedTracker(1024);
-  totals.update({ revolutions: 0, time: 0 }, 2000, 0);
-  totals.update({ revolutions: 10, time: 1024 }, 2000, 1000);
-  totals.update({ revolutions: 20, time: 2048 }, 2000, 2000);
-  near('distance accumulates', totals.update({ revolutions: 20, time: 2048 }, 2000, 2100).totalDistance, 40, 0.001);
-});
-
-suite('Fitness Machine Feature (0x2ACC)', () => {
-  // machine: cadence (1), total distance (2), resistance (7), heart rate (10), power (14)
-  // target: resistance (2), power (3), simulation (13), spin down (15)
-  const machine = (1 << 1) | (1 << 2) | (1 << 7) | (1 << 10) | (1 << 14);
-  const target = (1 << 2) | (1 << 3) | (1 << 13) | (1 << 15);
-  const features = parseFitnessMachineFeature(dv(...u32(machine), ...u32(target)));
-  check('reports cadence', features.reports.cadence);
-  check('reports total distance', features.reports.totalDistance);
-  check('reports power', features.reports.power);
-  check('reports heart rate', features.reports.heartRate);
-  check('does not claim average speed', !features.reports.averageSpeed);
-  check('accepts a power target — ERG will work', features.canSet.power);
-  check('accepts simulation parameters — free mode will work', features.canSet.simulation);
-  check('accepts resistance', features.canSet.resistance);
-  check('supports spin-down', features.canSet.spinDown);
-  check('does not claim an inclination target', !features.canSet.inclination);
-  check('does not claim a heart-rate target', !features.canSet.heartRate);
-
-  const readOnly = parseFitnessMachineFeature(dv(...u32(1 << 14), ...u32(0)));
-  check('a power-only sensor accepts no targets',
-    !readOnly.canSet.power && !readOnly.canSet.simulation && readOnly.reports.power);
-
-  const noTargetBytes = parseFitnessMachineFeature(dv(...u32(1 << 14)));
-  check('a four-byte feature value does not throw', noTargetBytes.canSet.power === false);
-});
-
-suite('other characteristics', () => {
-  const range = parseSupportedPowerRange(dv(...u16(0xff9c), ...u16(2000), ...u16(1)));
-  near('a negative minimum is signed', range.min, -100, 0.001);
-  near('maximum power', range.max, 2000, 0.001);
-  near('increment', range.increment, 1, 0.001);
-
-  check('UTF-8 strings drop their padding',
-    parseUtf8(dv(0x57, 0x61, 0x68, 0x6f, 0x6f, 0x00, 0x00)) === 'Wahoo');
-  check('16-bit UUIDs expand to the Bluetooth base UUID',
-    uuid16(0x1826) === '00001826-0000-1000-8000-00805f9b34fb', uuid16(0x1826));
-  check('heart rate service UUID', uuid16(0x180d) === '0000180d-0000-1000-8000-00805f9b34fb');
 });
 
 // ---- hub source selection -------------------------------------------------

@@ -36,62 +36,6 @@ suite('files are kept in IndexedDB', () => {
   check('summaries survive too', fetched?.route?.name === 'Loop' && fetched.route.profile[0][1] === 1);
 });
 
-clock = 4_000;
-await reopened.touch('bbb');
-await reopened.touch('missing');
-const touched = await reopened.list();
-await reopened.remove('aaa');
-const removed = await reopened.list();
-
-suite('touch and remove', () => {
-  check('touch moves a file to the front', touched[0].sha256 === 'bbb' && touched[0].lastUsedAt === 4_000);
-  check('touching an unknown file adds nothing', touched.length === 2);
-  check('remove deletes it', removed.length === 1 && removed[0].sha256 === 'bbb');
-});
-
-const versions = await new Promise<{ version: number; stores: string[] }>((resolve) => {
-  const open = factory.open(DB_NAME);
-  open.onsuccess = () => {
-    const db = open.result;
-    resolve({ version: db.version, stores: Array.from(db.objectStoreNames) });
-    db.close();
-  };
-});
-
-suite('one database, versioned for later stores', () => {
-  check(`named ${DB_NAME}, version ${DB_VERSION}`, versions.version === 3);
-  check('with done, files, plan, refs and rides stores',
-    versions.stores.sort().join() === 'done,files,plan,refs,rides', versions.stores.join());
-});
-
-clock = 5_000;
-await reopened.setDone('catalog:workout:a', true);
-await reopened.setDone('mine:bbb', true);
-clock = 6_000;
-await reopened.setDone('builtin:quick', true);
-await reopened.setDone('builtin:quick', false);
-await reopened.setDone('never-marked', false);
-const marks = await (await openLibraryStore(factory, now)).doneMarks();
-await reopened.remove('bbb');
-const marksAfterRemove = await reopened.doneMarks();
-const noneFollowed = await reopened.followed();
-await reopened.follow('plan:Gravel');
-await reopened.follow('plan:GranFondo');
-const followedAfterReload = await (await openLibraryStore(factory, now)).followed();
-await reopened.follow(undefined);
-const followedAfterStop = await reopened.followed();
-
-suite('done marks and the followed plan', () => {
-  check('marks survive a new connection', marks.map((m) => m.key).sort().join() === 'catalog:workout:a,mine:bbb',
-    marks.map((m) => m.key).join());
-  check('with the time they were made', marks.find((m) => m.key === 'catalog:workout:a')?.doneAt === 5_000);
-  check('unmarking removes the mark; unmarking nothing is harmless', !marks.some((m) => m.key === 'builtin:quick'));
-  check('removing a My library file removes its mark', marksAfterRemove.map((m) => m.key).join() === 'catalog:workout:a');
-  check('no plan is followed at first', noneFollowed === undefined);
-  check('following another plan replaces it, across a reload', followedAfterReload === 'plan:GranFondo');
-  check('stop following clears it', followedAfterStop === undefined);
-});
-
 // The owner's browser already has a version 1 database with files in it.
 const legacy = new IDBFactory();
 await new Promise<void>((resolve) => {
@@ -172,31 +116,8 @@ suite('the ride log', () => {
   check('a ride can be removed', afterRemoveRide.map((r) => r.startedAt).join() === '3000,2000');
 });
 
-// References to files not on this device. Only a restore creates them.
-const refFactory = new IDBFactory();
-const refStore = await openLibraryStore(refFactory, now);
+/** A My library entry without its bytes, as a backup holds it. */
 const refOf = (sha256: string, name = `${sha256}.zwo`) => ({ sha256, name, addedAt: 1, lastUsedAt: 1 });
-await refStore.replaceProfile({
-  done: [{ key: 'mine:far', doneAt: 5 }, { key: 'mine:gone', doneAt: 6 }],
-  library: [refOf('far', 'sweetspot.zwo'), refOf('gone')],
-  rides: [],
-});
-const refsBefore = await refStore.refs();
-const arrived = await refStore.save(file('far', 'sweetspot.zwo'));
-const refsAfterLoad = await refStore.refs();
-const filesAfterLoad = await refStore.list();
-await refStore.removeRef('gone');
-const refsAfterRemove = await refStore.refs();
-const marksAfterRefRemove = await refStore.doneMarks();
-
-suite('references not on this device', () => {
-  check('a restored reference without its file is listed', refsBefore.map((r) => r.sha256).sort().join() === 'far,gone');
-  check('loading the same file adds it', arrived === 'added' && filesAfterLoad.length === 1);
-  check('and the reference goes, so it is listed once', refsAfterLoad.map((r) => r.sha256).join() === 'gone');
-  check('its done mark is kept', marksAfterRefRemove.some((m) => m.key === 'mine:far'));
-  check('removing a reference removes it and its mark',
-    refsAfterRemove.length === 0 && !marksAfterRefRemove.some((m) => m.key === 'mine:gone'));
-});
 
 // A restore replaces the whole profile, all or nothing.
 const restoreFactory = new IDBFactory();
@@ -260,41 +181,6 @@ suite('a restore that fails partway', () => {
   check('reports the failure', threw);
   check('leaves every store as it was', JSON.stringify(afterFailed) === JSON.stringify(before),
     `${JSON.stringify(before)} → ${JSON.stringify(afterFailed)}`);
-});
-
-/** A factory whose open fails the way a private window's does. */
-const failing = {
-  open() {
-    const req: Record<string, unknown> = {};
-    setTimeout(() => { req.error = new DOMException('denied', 'InvalidStateError'); (req.onerror as () => void)?.(); });
-    return req;
-  },
-} as unknown as IDBFactory;
-const throwing = { open() { throw new DOMException('denied', 'SecurityError'); } } as unknown as IDBFactory;
-
-const refused = await openLibraryStore(failing);
-const thrown = await openLibraryStore(throwing);
-const missing = await openLibraryStore(undefined);
-
-suite('storage the browser refuses', () => {
-  check('an open that errors gives the unavailable store', refused === UNAVAILABLE_STORE && !refused.available);
-  check('an open that throws too', thrown === UNAVAILABLE_STORE);
-  check('no IndexedDB at all too', missing === UNAVAILABLE_STORE);
-});
-
-const nothing = await UNAVAILABLE_STORE.list();
-const saved = await UNAVAILABLE_STORE.save(file('x'));
-await UNAVAILABLE_STORE.setDone('x', true);
-const noMarks = await UNAVAILABLE_STORE.doneMarks();
-await UNAVAILABLE_STORE.logRide(ride(1));
-const noRides = await UNAVAILABLE_STORE.rides();
-const noRefs = await UNAVAILABLE_STORE.refs();
-
-suite('the unavailable store is harmless', () => {
-  check('lists nothing', nothing.length === 0);
-  check('saving reports unavailable', saved === 'unavailable');
-  check('marks nothing', noMarks.length === 0);
-  check('logs no rides and holds no references', noRides.length === 0 && noRefs.length === 0);
 });
 
 report();

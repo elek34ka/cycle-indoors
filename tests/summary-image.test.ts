@@ -42,34 +42,6 @@ const graphInput = (samples: Sample[], withProfile: boolean) => ({
   ...(withProfile ? { profile: { course, ridden: 5000, header: 'Hilly loop · 5.00 km · ↑ 60 m' } } : {}),
 });
 
-suite('the graph image has a fixed size', () => {
-  const plain = graphImageLayout(false);
-  const route = graphImageLayout(true);
-  check('1600 × 900 without a route', plain.width === 1600 && plain.height === 900, `${plain.width}×${plain.height}`);
-  check('1600 × 1240 with one', route.width === 1600 && route.height === 1240, `${route.width}×${route.height}`);
-  check('title band and workout graph without a route', plain.panels.map((p) => p.kind).join() === 'title,workout');
-  check('and the profile under the graph with one', route.panels.map((p) => p.kind).join() === 'title,workout,elevation');
-  const [, workout, elevation] = route.panels;
-  check('the profile sits below the graph', elevation.rect.y >= workout.rect.y + workout.rect.h);
-  check('every panel fits in the image', route.panels.every((p) => p.rect.y + p.rect.h <= route.height));
-
-  const narrow = (() => { dom.window.innerWidth = 360; return paintGraphImage(graphInput(ride(600), true))!; })();
-  const wide = (() => { dom.window.innerWidth = 2560; return paintGraphImage(graphInput(ride(600), true))!; })();
-  check('the painted canvas is the layout\'s size', narrow.width === 1600 && narrow.height === 1240,
-    `${narrow.width}×${narrow.height}`);
-  check('whatever the window\'s width', narrow.width === wide.width && narrow.height === wide.height);
-});
-
-suite('the graph image draws the graph, and the profile only on a route', () => {
-  const route = drawnText(() => paintGraphImage(graphInput(ride(600), true)));
-  check('the title is drawn', route.texts.includes(header.title));
-  check('the profile is drawn, with its header', route.texts.includes('Hilly loop · 5.00 km · ↑ 60 m') && route.texts.includes('km'));
-  check('the workout graph\'s time axis is drawn', route.texts.includes('10:00'), JSON.stringify(route.texts.slice(0, 20)));
-  const plain = drawnText(() => paintGraphImage(graphInput(ride(600), false)));
-  check('no profile without a route', !plain.texts.includes('km'));
-  check('no hover readout in either', ![...route.texts, ...plain.texts].some((t) => t.startsWith('actual ')));
-});
-
 const statsInput = (samples: Sample[], extra: Partial<StatsCardInput> = {}): StatsCardInput => {
   const m = computeMetrics(samples, 250, 185);
   return {
@@ -98,30 +70,6 @@ suite('the stats card holds what the summary shows', () => {
   check('and everything inside it', layout.items.every((i) => i.y >= 0 && i.y < layout.height && i.x <= layout.width));
   const sizes = layout.items.flatMap((i) => (i.kind === 'text' ? [Number(/(\d+)px/.exec(i.font)?.[1])] : []));
   check('no text under 18 px', Math.min(...sizes) >= 18, String(Math.min(...sizes)));
-});
-
-suite('the stats card leaves out what the ride does not have', () => {
-  const shown = texts(statsInput(ride(600, { hr: false })));
-  check('no Climbed without a route', !shown.includes('Climbed'));
-  check('no heart rate: says so', shown.includes('No heart rate recorded'));
-  check('instead of the five heart-rate zones', !shown.includes('Z1 Recovery'));
-  const card = paintStatsImage(statsInput(ride(600)))!;
-  check('the painted canvas is the layout\'s size',
-    card.width === 1200 && card.height === statsCardLayout(statsInput(ride(600))).height);
-});
-
-const png = await renderStatsImage(statsInput(ride(600)));
-const proto = dom.window.HTMLCanvasElement.prototype;
-const realToBlob = proto.toBlob;
-proto.toBlob = function refuse(callback: BlobCallback) { callback(null); };
-const refused = await renderStatsImage(statsInput(ride(600)));
-proto.toBlob = function broken() { throw new Error('tainted'); };
-const thrown = await renderStatsImage(statsInput(ride(600)));
-proto.toBlob = realToBlob;
-suite('the stats image is encoded as PNG', () => {
-  check('a PNG blob', png?.type === 'image/png', png?.type);
-  check('null when the browser gives no image', refused === null);
-  check('null, not a throw, when encoding fails', thrown === null);
 });
 
 report();

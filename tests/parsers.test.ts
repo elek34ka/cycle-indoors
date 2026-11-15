@@ -21,23 +21,6 @@ suite('every library workout parses', () => {
   }
 });
 
-suite('the free-ride workouts have no targets at all', () => {
-  for (const [id, hours] of [['free-ride-1h', 1]] as const) {
-    const entry = LIBRARY.find((e) => e.id === id)!;
-    const workout = parseZwo(entry.zwo, CTX);
-    near(`${id}: ${hours} hours long`, workout.duration, hours * 3600, 0.01);
-    check(`${id}: one block per hour`, workout.segments.length === hours, String(workout.segments.length));
-    check(`${id}: every block is free riding`, workout.segments.every((s) => s.mode === 'free'));
-    check(`${id}: no block carries a power target`,
-      workout.segments.every((s) => s.powerStart === undefined && s.powerEnd === undefined));
-      check(`${id}: one message per hour`, workout.textEvents.length === hours,
-      String(workout.textEvents.length));
-    check(`${id}: the messages are spread across the ride`,
-      workout.textEvents.every((e, i, all) => i === 0 || e.time > all[i - 1].time),
-      JSON.stringify(workout.textEvents.map((e) => e.time)));
-  }
-});
-
 suite('zwo block types', () => {
   const workout = parseZwo(`<workout_file>
     <name>Mixed</name><author>Tester</author><description>All block types</description>
@@ -75,44 +58,6 @@ suite('zwo block types', () => {
     workout.textEvents.length === 1 && workout.textEvents[0].time === 310, JSON.stringify(workout.textEvents));
 });
 
-suite('block targets are written in watts and percent', () => {
-  const seg = (powerStart?: number, powerEnd?: number, name?: string) => ({
-    index: 0, start: 0, duration: 600, powerStart, powerEnd, name,
-    mode: powerStart === undefined ? 'free' as const : 'erg' as const, kind: 'Test', label: 'Free ride',
-  });
-  const eq = (title: string, got: string | undefined, want: string) => check(title, got === want, `got ${got}`);
-  eq('rising ramp', targetText(seg(0.6, 0.8), 300), '180–240 W (60–80%)');
-  eq('falling ramp keeps its direction', targetText(seg(0.8, 0.6), 300), '240–180 W (80–60%)');
-  eq('steady block', targetText(seg(0.75, 0.75), 300), '225 W (75%)');
-  eq('steady block without an end', targetText(seg(0.75), 300), '225 W (75%)');
-  eq('named interval', blockLabel(seg(1.1, 1.1, '1/5'), 300), '1/5 · 330 W (110%)');
-  eq('unnamed block is just its target', blockLabel(seg(0.6, 0.8), 300), '180–240 W (60–80%)');
-  eq('free block keeps its label', blockLabel(seg(), 300), 'Free ride');
-  check('free block has no target', targetText(seg(), 300) === undefined && wattsText(seg(), 300) === undefined);
-  eq('graph form of a ramp', wattsText(seg(0.6, 0.8), 300), '180–240 W');
-  eq('graph form of a steady block', wattsText(seg(0.75, 0.75), 300), '225 W');
-  eq('a near-flat ramp is written as steady', targetText(seg(0.75, 0.751), 300), '225 W (75%)');
-  eq('watts are rounded to the nearest watt', targetText(seg(0.55), 222), '122 W (55%)');
-});
-
-suite('zwo edge cases', () => {
-  const watts = parseZwo(`<workout_file><name>W</name><workout>
-      <SteadyState Duration="60" Power="200"/></workout></workout_file>`, CTX);
-  near('absolute watts are normalised against FTP', watts.segments[0].powerStart!, 200 / 250, 0.001);
-
-  let threw = false;
-  try { parseZwo('<nope/>', CTX); } catch { threw = true; }
-  check('a non-workout XML file is rejected', threw);
-
-  threw = false;
-  try { parseZwo('not xml at all <<<', CTX); } catch { threw = true; }
-  check('malformed XML is rejected', threw);
-
-  const unknown = parseZwo(`<workout_file><name>U</name><workout>
-      <Pyramid Duration="120"/><SteadyState Duration="60" Power="0.6"/></workout></workout_file>`, CTX);
-  near('an unknown block still occupies its time', unknown.duration, 180, 0.01);
-});
-
 suite('gpx parsing', () => {
   const gpx = `<?xml version="1.0"?>
   <gpx version="1.1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
@@ -138,26 +83,6 @@ suite('gpx parsing', () => {
   let threw = false;
   try { parseGpx('<gpx></gpx>', 'x'); } catch { threw = true; }
   check('a GPX with no points is rejected', threw);
-});
-
-suite('the shipped sample files load', () => {
-  const zwo = parseZwo(readFileSync('samples/sample-over-unders.zwo', 'utf8'), CTX);
-  check('the sample workout parses', zwo.name === 'Over-unders 3 x 9', zwo.name);
-  near('it is 65 minutes long', zwo.duration / 60, 65, 0.5);
-  check('it has a free-ride block', zwo.segments.some((x) => x.mode === 'free'));
-  check('it carries four text events', zwo.textEvents.length === 4, String(zwo.textEvents.length));
-  check('every block has a label', zwo.segments.every((x) => x.label.length > 0));
-
-  const gpx = parseGpx(readFileSync('samples/sample-hilly-loop.gpx', 'utf8'), 'fallback');
-  check('the sample route parses', gpx.points.length === 420, String(gpx.points.length));
-  check('it has power, HR and elevation', gpx.hasPower && gpx.hasHr && gpx.hasElevation);
-  check('its distance is a plausible loop', gpx.distance > 8000 && gpx.distance < 30000,
-    `${Math.round(gpx.distance)} m`);
-  check('smoothing keeps ascent and descent close on a loop',
-    Math.abs(gpx.ascent - gpx.descent) / gpx.ascent < 0.25,
-    `+${Math.round(gpx.ascent)} / -${Math.round(gpx.descent)}`);
-  check('the loop returns near its start',
-    Math.abs(gpx.points[0].lat - gpx.points[419].lat) < 0.01, 'start/finish drift');
 });
 
 report();

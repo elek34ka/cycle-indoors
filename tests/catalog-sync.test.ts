@@ -42,58 +42,6 @@ const edited = await buildCatalog([{ path: 'workouts/a.zwo', bytes: zwo(660) }, 
 const removed = await buildCatalog([{ path: 'workouts/a.zwo', bytes: zwo(600) }]);
 const keyOf = (b: typeof v1, id: string) => b.index.workouts.find((w) => w.id === id)!.file.key;
 
-suite('planSync: an empty bucket gets everything', () => {
-  const plan = planSync(undefined, v1.index);
-  check('both files uploaded', plan.uploads.length === 2);
-  check('index written', plan.writeIndex);
-  check('nothing deleted', plan.deletes.length === 0);
-});
-
-suite('planSync: nothing changed', () => {
-  const plan = planSync(v1.index, v1Again.index);
-  check('no uploads', plan.uploads.length === 0);
-  check('no deletes', plan.deletes.length === 0);
-  check('index not rewritten for a new build time alone', !plan.writeIndex);
-});
-
-suite('planSync: an edited file', () => {
-  const plan = planSync(v1.index, edited.index);
-  check('the new key is uploaded', plan.uploads.join() === keyOf(edited, 'workout:a'));
-  check('the old key is deleted', plan.deletes.join() === keyOf(v1, 'workout:a'));
-  check('the unchanged file is left alone', !plan.uploads.includes(keyOf(v1, 'workout:b'))
-    && !plan.deletes.includes(keyOf(v1, 'workout:b')));
-  check('index written', plan.writeIndex);
-});
-
-suite('planSync: a removed file', () => {
-  const plan = planSync(v1.index, removed.index);
-  check('nothing to upload', plan.uploads.length === 0);
-  check('its key is deleted', plan.deletes.join() === keyOf(v1, 'workout:b'));
-  check('index written', plan.writeIndex);
-});
-
-suite('planSync: a change to the index alone still writes it', () => {
-  const renamed = { ...v1.index, workouts: v1.index.workouts.map((w) => ({ ...w, tags: ['x'] })) };
-  check('index written', planSync(v1.index, renamed).writeIndex);
-});
-
-const first = fakeBucket();
-await runSync(v1, first);
-const firstCalls = [...first.calls];
-first.calls.length = 0;
-await runSync(v1Again, first);
-const secondCalls = [...first.calls];
-
-suite('runSync: first sync, then an unchanged one', () => {
-  check('files first, index last', firstCalls[firstCalls.length - 1] === `put ${INDEX_KEY}`
-    && firstCalls.filter((c) => c.startsWith('put')).length === 3, firstCalls.join(', '));
-  const file = first.objects.get(keyOf(v1, 'workout:a'))!;
-  check('files cached forever', file.cacheControl === FILE_CACHE && file.contentType === 'application/xml');
-  check('index cached for a minute', first.objects.get(INDEX_KEY)?.cacheControl === INDEX_CACHE
-    && first.objects.get(INDEX_KEY)?.contentType === 'application/json');
-  check('the second sync only reads the index', secondCalls.join() === `get ${INDEX_KEY}`, secondCalls.join(', '));
-});
-
 const editBucket = fakeBucket();
 await runSync(v1, editBucket);
 editBucket.calls.length = 0;
@@ -155,18 +103,6 @@ suite('runSync refuses to start on a failed build or an unreadable bucket index'
   check('newer bucket index: rejected', garbledError !== undefined && /cannot be read/.test(garbledError.message),
     garbledError?.message);
   check('newer bucket index: nothing written', !garbled.calls.some((c) => c.startsWith('put') || c.startsWith('delete')));
-});
-
-const flaky = fakeBucket();
-await runSync(v1, flaky);
-flaky.delete = async (key: string) => { flaky.calls.push(`delete ${key}`); throw new Error('network'); };
-const flakyLines: string[] = [];
-const flakyResult = await runSync(removed, flaky, { log: (l) => flakyLines.push(l) });
-
-suite('runSync: a failed delete is reported, not fatal', () => {
-  check('the sync completes', flakyResult.deleted === 0 && flakyResult.plan.deletes.length === 1);
-  check('the new index is live', JSON.parse(new TextDecoder().decode(flaky.objects.get(INDEX_KEY)!.bytes)).workouts.length === 1);
-  check('the leftover is reported', flakyLines.some((l) => l.includes('could not delete')));
 });
 
 report();

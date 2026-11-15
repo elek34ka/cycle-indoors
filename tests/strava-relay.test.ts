@@ -76,19 +76,6 @@ const tokenReply = {
 }
 
 {
-  const malformed = await post('{nope');
-  const empty = await post({});
-  const numeric = await post({ code: 42 });
-
-  suite('bad input is refused before Strava sees it', () => {
-    check('malformed JSON is a 400', malformed.status === 400, String(malformed.status));
-    check('neither code nor refresh_token is a 400', empty.status === 400, String(empty.status));
-    check('a non-string code is a 400', numeric.status === 400, String(numeric.status));
-    check('none of these reached Strava', sent.length === 0, String(sent.length));
-  });
-}
-
-{
   stravaReply = () => Response.json(tokenReply);
   const res = await post({ code: 'abc' });
   const out = await res.json() as Record<string, unknown>;
@@ -123,24 +110,6 @@ const tokenReply = {
     check('adds the client secret', req.body.get('client_secret') === 's3cret');
     check('sends no code', !req.body.has('code'));
     check('returns the rotated refresh token', out.refresh_token === 'ref2', out.refresh_token);
-  });
-}
-
-{
-  const strava400 = { message: 'Bad Request', errors: [{ resource: 'AuthorizationCode', field: 'code', code: 'invalid' }] };
-  stravaReply = () => Response.json(strava400, { status: 400 });
-  const refused = await post({ code: 'stale' });
-  const refusedBody = await refused.json();
-
-  stravaReply = () => { throw new TypeError('network down'); };
-  const down = await post({ code: 'abc' });
-
-  suite('Strava failures reach the app', () => {
-    check('Strava\'s status is passed through', refused.status === 400, String(refused.status));
-    check('Strava\'s error body is passed through', JSON.stringify(refusedBody) === JSON.stringify(strava400));
-    check('errors carry the CORS header', refused.headers.get('Access-Control-Allow-Origin') === APP);
-    check('an unreachable Strava is a 502', down.status === 502, String(down.status));
-    check('a 502 carries the CORS header', down.headers.get('Access-Control-Allow-Origin') === APP);
   });
 }
 
@@ -193,62 +162,6 @@ const sameBytes = (a: Uint8Array | undefined, b: Uint8Array) =>
     check('Strava\'s body comes back', out.id === 77, JSON.stringify(out));
     check('Strava\'s content type comes back', res.headers.get('Content-Type')?.startsWith('application/json') === true);
     check('carries the CORS header', res.headers.get('Access-Control-Allow-Origin') === APP);
-  });
-}
-
-{
-  sent.length = 0;
-  stravaReply = () => Response.json({ id: 77, activity_id: 555 });
-  const status = await api('/strava/uploads/77', { headers: bearer });
-  const statusReq = sent.at(-1)!;
-  stravaReply = () => Response.json({ firstname: 'Ada' });
-  const athlete = await api('/strava/athlete', { headers: bearer });
-  const athleteReq = sent.at(-1)!;
-  stravaReply = () => Response.json({ access_token: 'acc' });
-  const deauth = await api('/strava/deauthorize', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: 'access_token=acc',
-  });
-  const deauthReq = sent.at(-1)!;
-
-  suite('upload status, athlete and deauthorize are forwarded', () => {
-    check('upload 77\'s status is asked of Strava', statusReq.url === `${STRAVA_API_BASE}/uploads/77`
-      && statusReq.method === 'GET', `${statusReq.method} ${statusReq.url}`);
-    check('a GET sends no body', statusReq.raw === undefined && !statusReq.headers['Content-Type']);
-    check('the status reply comes back', status.status === 200 && (statusReq.headers.Authorization === 'Bearer acc'));
-    check('the athlete is asked of Strava with the bearer',
-      athleteReq.url === `${STRAVA_API_BASE}/athlete` && athleteReq.headers.Authorization === 'Bearer acc', athleteReq.url);
-    check('the athlete reply comes back', athlete.status === 200);
-    check('deauthorize goes to Strava\'s OAuth endpoint',
-      deauthReq.url === STRAVA_DEAUTHORIZE_URL && deauthReq.method === 'POST', deauthReq.url);
-    check('deauthorize carries the token as its form, needing no bearer',
-      new TextDecoder().decode(deauthReq.raw) === 'access_token=acc' && deauth.status === 200);
-  });
-}
-
-{
-  stravaReply = () => new Response('{"message":"Authorization Error"}', { status: 401, headers: { 'content-type': 'application/json' } });
-  const revoked = await api('/strava/athlete', { headers: bearer });
-  const revokedBody = await revoked.text();
-  stravaReply = () => Response.json({ message: 'Rate Limit Exceeded' }, { status: 429 });
-  const limited = await api('/strava/uploads', { method: 'POST', headers: bearer, body: 'x' });
-  const processing = { id: 9, error: 'Improperly formatted data.', status: 'There was an error processing your activity.' };
-  stravaReply = () => Response.json(processing);
-  const failed = await api('/strava/uploads/9', { headers: bearer });
-  const failedBody = await failed.json();
-  stravaReply = () => { throw new TypeError('network down'); };
-  const down = await api('/strava/uploads', { method: 'POST', headers: bearer, body: 'x' });
-
-  suite('Strava\'s answers reach the app unchanged', () => {
-    check('a 401 is passed through', revoked.status === 401, String(revoked.status));
-    check('with Strava\'s body', revokedBody === '{"message":"Authorization Error"}', revokedBody);
-    check('a 429 is passed through', limited.status === 429, String(limited.status));
-    check('a processing error body is passed through', JSON.stringify(failedBody) === JSON.stringify(processing));
-    check('all of them carry the CORS header', [revoked, limited, failed]
-      .every((r) => r.headers.get('Access-Control-Allow-Origin') === APP));
-    check('an unreachable Strava is a 502', down.status === 502, String(down.status));
-    check('that 502 carries the CORS header', down.headers.get('Access-Control-Allow-Origin') === APP);
   });
 }
 

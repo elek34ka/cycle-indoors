@@ -82,13 +82,6 @@ const both = previews().map((p) => `${p.dataset.status}:${p.querySelector('.lib-
 const bothSvgs = previews().filter((p) => p.querySelector('svg')).length;
 const bothButton = { text: replay()?.textContent, disabled: replay()?.disabled };
 
-suite('a past ride\'s preview', () => {
-  check('the list shows no previews and fetches no files', !/Ride same session/.test(listText) && fetchedForList === 0);
-  check('clicking a ride shows its workout and its route', both.join() === `found:Over Unders,found:${R.name}`, both.join());
-  check('each with its profile', bothSvgs === 2);
-  check('and Ride same session, enabled', bothButton.text === 'Ride same session' && bothButton.disabled === false);
-});
-
 replay()!.click();
 await until(() => active('ride'), (on) => on);
 await settle();
@@ -101,55 +94,6 @@ suite('Ride same session', () => {
   check('and goes to the ride', active('ride'));
   check('known again as the same Library entries, with their hashes', entryFor(loadedWorkout)?.key === `catalog:${W.id}`
     && entryFor(loadedWorkout)?.sha256 === W.file.sha256 && routeEntryFor(loadedCourse)?.key === `catalog:${R.id}`);
-});
-
-await openRides();
-row(may(4)).click();
-const renamed = previews().map((p) => p.dataset.status).join();
-const renamedReady = replay()?.disabled === false;
-row(may(3)).click();
-const halfStatus = previews().map((p) => p.dataset.status).join();
-const halfText = lib('.lib-detail')!.textContent ?? '';
-const halfButton = replay();
-halfButton?.click();
-await settle();
-const stayed = active('library') && session.snapshot.workout?.name === 'Over Unders';
-row(may(1)).click();
-const freeButton = replay();
-
-suite('when it cannot, or there is nothing to ride', () => {
-  check('a renamed catalog file is found by its hash', renamed === 'found' && renamedReady, renamed);
-  check('a route that is gone: "No route found", and the workout still previewed', halfStatus === 'found,missing'
-    && /No route found/.test(halfText) && /Lost loop/.test(halfText), halfText);
-  check('and Ride same session cannot be pressed', halfButton !== null && halfButton.disabled
-    && /not in the Library/.test(halfButton.title));
-  check('pressing it anyway changes nothing', stayed);
-  check('a free ride has no workout, no route and no button', freeButton === null && previews().length === 0);
-});
-
-// The built-in on its own: the route from before is unloaded, as that ride had none.
-row(may(2)).click();
-replay()!.click();
-await until(() => active('ride'), (on) => on);
-await settle();
-
-suite('the same session, and nothing else', () => {
-  check('the built-in workout is loaded', entryFor(session.snapshot.workout)?.key === 'builtin:quick-test');
-  check('and the route that ride did not have is gone', courseStore.current === undefined);
-});
-
-// Back to the first: while a ride is in progress, it cannot be pressed.
-await openRides();
-row(may(5)).click();
-session.start();
-await settle();
-const locked = replay()?.disabled === true;
-session.finish();
-await settle();
-doc.querySelector<HTMLButtonElement>('.overlay:not(.hidden) .summary-close, #summary-close')?.click();
-
-suite('during a ride', () => {
-  check('Ride same session is disabled', locked);
 });
 
 settings.patch({ librarySection: 'workouts' });

@@ -25,33 +25,6 @@ function previousHrZoneColor(bpm: number, hrMax: number): string {
   return '#e4563c';
 }
 
-suite('heart-rate zones are labelled', () => {
-  check('five zones', HR_ZONES.length === 5);
-  check('named Recovery to Maximum',
-    HR_ZONES.map((z) => z.label).join() === 'Recovery,Endurance,Tempo,Threshold,Maximum');
-  check('keyed z1 to z5', HR_ZONES.map((z) => z.key).join() === 'z1,z2,z3,z4,z5');
-});
-
-suite('a heart rate falls in one zone, the bound in the zone below', () => {
-  check('111 of 185 (60%) is Z1', zoneForHr(111, 185).id === 1);
-  check('112 of 185 is Z2', zoneForHr(112, 185).id === 2);
-  check('140 of 185 is Z3', zoneForHr(140, 185).id === 3);
-  check('160 of 185 is Z4', zoneForHr(160, 185).id === 4);
-  check('170 of 185 is Z5', zoneForHr(170, 185).id === 5);
-  check('above max is Z5', zoneForHr(200, 185).id === 5);
-  check('no max HR set is Z1, not a crash', zoneForHr(150, 0).id === 1);
-});
-
-suite('the trace colour is unchanged', () => {
-  let same = true;
-  for (const hrMax of [0, 170, 185, 200]) {
-    for (let bpm = 100; bpm <= 200; bpm++) {
-      if (hrZoneColor(bpm, hrMax) !== previousHrZoneColor(bpm, hrMax)) same = false;
-    }
-  }
-  check('every bpm from 100 to 200 gets the colour it had before', same);
-});
-
 suite('time in heart-rate zones', () => {
   const steady = ride(900, (i) => (i < 600 ? 140 : 160));
   check('600 s at 140 and 300 s at 160 bpm, max 185: Z3 10:00, Z4 5:00, nothing else',

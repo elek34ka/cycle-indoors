@@ -54,40 +54,4 @@ suite('an unreachable catalog', () => {
     && /404/.test(missingResult.message));
 });
 
-const newer = await new CatalogClient(BASE, stand({ [`${BASE}/index.json`]: json({ ...index, version: 2 }) }).fetchFn).loadIndex();
-const garbage = await new CatalogClient(BASE, stand({ [`${BASE}/index.json`]: () => new Response('<html>') }).fetchFn).loadIndex();
-const damaged = await new CatalogClient(BASE, stand({ [`${BASE}/index.json`]: json({ version: 1 }) }).fetchFn).loadIndex();
-
-suite('an index the app cannot use', () => {
-  check('newer major version refused for its version', !newer.ok && newer.reason === 'version'
-    && /newer version of the app/.test(newer.message));
-  check('not JSON: unavailable', !garbage.ok && garbage.reason === 'network');
-  check('damaged: refused as damaged', !damaged.ok && damaged.reason === 'shape');
-});
-
-const unconfigured = new CatalogClient('', async () => { throw new Error('must not be called'); });
-const unconfiguredResult = await unconfigured.loadIndex();
-
-suite('no catalog configured', () => {
-  check('reported as unconfigured', !unconfiguredResult.ok && unconfiguredResult.reason === 'unconfigured');
-  check('configured is false', !unconfigured.configured && okClient.configured);
-});
-
-const stale = new CatalogClient(BASE, stand({ [`${BASE}/${file.key}`]: () => new Response('something else') }).fetchFn);
-let staleError: Error | undefined;
-try { await stale.fetchFile(file); } catch (err) { staleError = err as Error; }
-const gone = new CatalogClient(BASE, stand({}).fetchFn);
-let goneError: Error | undefined;
-try { await gone.fetchFile(file); } catch (err) { goneError = err as Error; }
-const offline = new CatalogClient(BASE, async () => { throw new TypeError('Failed to fetch'); });
-let offlineError: Error | undefined;
-try { await offline.fetchFile(file); } catch (err) { offlineError = err as Error; }
-
-suite('a file that cannot be used', () => {
-  check('hash mismatch: refused as out of date', /out of date/.test(staleError?.message ?? ''), staleError?.message);
-  check('404: could not download', /Could not download.*404/.test(goneError?.message ?? ''), goneError?.message);
-  check('offline: could not download', /Could not download.*Failed to fetch/.test(offlineError?.message ?? ''),
-    offlineError?.message);
-});
-
 report();

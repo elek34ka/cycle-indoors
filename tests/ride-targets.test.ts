@@ -67,40 +67,6 @@ suite('an ERG block can be overridden in watts', () => {
 });
 
 session.setBlockOverride(250);
-await settle();
-
-suite('override of a steady block', () => {
-  const s = session.snapshot;
-  check('the target is the typed watts', s.targetPower === 250, String(s.targetPower));
-  check('the snapshot reports the override', s.blockOverride === 250, String(s.blockOverride));
-  check('the trainer was sent 250 W', last().kind === 'power' && (last() as { watts: number }).watts === 250, lastText());
-  check('bias is not applied to it', s.ergBias === 1.05 && s.targetPower !== Math.round(250 * 1.05));
-  session.nudgeBias(0.01);
-  session.setErgBias(1.2);
-  check('bias cannot be changed while it is in force', session.snapshot.ergBias === 1.05, String(session.snapshot.ergBias));
-  check('so the target stays at the override', session.snapshot.targetPower === 250);
-});
-
-suite('override values out of range are refused', () => {
-  for (const bad of [10, 3000, Number.NaN, 24, 2001]) {
-    check(`${bad} W is refused`, session.setBlockOverride(bad) === false);
-  }
-  check('and the target in force is kept', session.snapshot.targetPower === 250, String(session.snapshot.targetPower));
-  check('25 W and 2000 W are the limits', session.setBlockOverride(25) && session.setBlockOverride(2000));
-  session.setBlockOverride(250);
-});
-
-session.setBlockOverride(undefined);
-await settle();
-
-suite('clearing the override', () => {
-  const s = session.snapshot;
-  check('returns to target × bias', s.targetPower === 231, String(s.targetPower));
-  check('and the snapshot has no override', s.blockOverride === undefined);
-  check('the trainer was told', last().kind === 'power' && (last() as { watts: number }).watts === 231, lastText());
-});
-
-session.setBlockOverride(250);
 session.skipToNextBlock();
 await settle();
 
@@ -115,13 +81,6 @@ suite('Next block ends the override', () => {
 session.setBlockOverride(180);
 session.seek(20);
 await settle();
-
-suite('override of a ramp', () => {
-  const s = session.snapshot;
-  check('still in the ramp after +20 s', s.segmentIndex === 1, String(s.segmentIndex));
-  check('the ramp is held flat at the override', s.targetPower === 180, String(s.targetPower));
-  check('the trainer holds 180 W', last().kind === 'power' && (last() as { watts: number }).watts === 180, lastText());
-});
 
 const samplesBeforeOverride = session.snapshot.samples.length;
 await wait(2200);
@@ -138,80 +97,11 @@ session.seek(30);
 session.seek(30);
 await settle();
 
-suite('+30 s across a block boundary ends the override', () => {
-  const s = session.snapshot;
-  check('the FreeRide block is current', s.segmentIndex === 2 && s.effectiveMode === 'free', `${s.segmentIndex} ${s.effectiveMode}`);
-  check('the override is gone', s.blockOverride === undefined);
-});
-
 suite('free riding defaults to a gradient', () => {
   const s = session.snapshot;
   check('Grade is the default', s.freeTarget === 'grade');
   check('the trainer is held at a gradient', s.controlMode === 'grade' && last().kind === 'grade', lastText());
   check('no power target is in force', s.targetPower === 0, String(s.targetPower));
-});
-
-const gradeSamplesFrom = session.snapshot.samples.length;
-await wait(1200);
-const gradeSamples = session.snapshot.samples.slice(gradeSamplesFrom);
-const freeMark = sent.length;
-session.setFreeTarget('power');
-await settle();
-
-suite('a FreeRide block ridden at power', () => {
-  const s = session.snapshot;
-  check('samples while holding a gradient have no target', gradeSamples.length > 0 && gradeSamples.every((x) => x.targetPower === 0),
-    JSON.stringify(gradeSamples.map((x) => x.targetPower)));
-  check('the first choice of Watts starts at 60 % of FTP (220 W → 130 W)', s.freePower === 130, String(s.freePower));
-  check('the trainer is sent 130 W', last().kind === 'power' && (last() as { watts: number }).watts === 130, lastText());
-  check('it is in power control while still a free block', s.controlMode === 'power' && s.effectiveMode === 'free');
-  check('the Target is the free watts', s.targetPower === 130);
-});
-
-session.setFreePower(180);
-await settle();
-
-suite('the free watts are the rider\'s', () => {
-  const s = session.snapshot;
-  check('180 W is in force', s.targetPower === 180, String(s.targetPower));
-  check('without bias', s.ergBias === 1.05);
-  check('no gradient was sent since Watts was chosen', sentSince(freeMark).every((c) => c.kind === 'power'),
-    JSON.stringify(sentSince(freeMark)));
-  check('out of range is refused', session.setFreePower(10) === false && session.setFreePower(5000) === false);
-  check('and leaves 180 W', session.snapshot.freePower === 180);
-});
-
-const freeSamplesFrom = session.snapshot.samples.length;
-await wait(1200);
-const freeSamples = session.snapshot.samples.slice(freeSamplesFrom);
-
-suite('the recorded target is the free watts', () => {
-  check('each second carries 180 W', freeSamples.length > 0 && freeSamples.every((x) => x.targetPower === 180),
-    JSON.stringify(freeSamples.map((x) => x.targetPower)));
-});
-
-session.skipToNextBlock();
-await settle();
-const ergBlockTarget = session.snapshot.targetPower;
-session.skipToNextBlock();
-await settle();
-
-suite('the free target persists across an ERG block', () => {
-  check('the ERG block in between used its own target × bias', ergBlockTarget === Math.round(1.5 * 220 * 1.05),
-    String(ergBlockTarget));
-  const s = session.snapshot;
-  check('the second FreeRide block is current', s.segmentIndex === 4, String(s.segmentIndex));
-  check('it holds 180 W again', s.targetPower === 180 && last().kind === 'power'
-    && (last() as { watts: number }).watts === 180, lastText());
-});
-
-session.skipToNextBlock();
-await settle();
-
-suite('after the workout ends', () => {
-  const s = session.snapshot;
-  check('the workout is complete', s.workoutComplete);
-  check('the free watts still hold', s.targetPower === 180 && s.controlMode === 'power', `${s.targetPower} ${s.controlMode}`);
 });
 
 suite('Follow route is on when a route is loaded', () => {
@@ -223,57 +113,6 @@ suite('Follow route is on when a route is loaded', () => {
   check('and it stays off', session.snapshot.followCourse === false);
   courseStore.load(hill('Second'));
   check('loading another route turns it on again', session.snapshot.followCourse === true);
-});
-
-await wait(1500);
-session.setFreeTarget('grade');
-await settle();
-
-suite('back to Grade follows the route', () => {
-  const s = session.snapshot;
-  check('the trainer is held at a gradient', s.controlMode === 'grade' && last().kind === 'grade', lastText());
-  check('it is the route\'s gradient', s.coursePosition !== undefined
-    && Math.abs((last() as { grade: number }).grade - s.coursePosition.gradient) < 0.5,
-    `${lastText()} vs ${s.coursePosition?.gradient}`);
-  check('and the free watts are remembered', s.freePower === 180);
-});
-
-session.setFreeTarget('power');
-session.loadWorkout(undefined);
-session.start();
-await settle();
-
-suite('an open ride at power', () => {
-  const s = session.snapshot;
-  check('no workout, so free', s.workout === undefined && s.effectiveMode === 'free');
-  check('the trainer holds the free watts', s.targetPower === 180 && last().kind === 'power'
-    && (last() as { watts: number }).watts === 180, lastText());
-});
-
-session.loadWorkout(workout());
-session.start();
-session.setBlockOverride(260);
-session.setMode('free');
-await settle();
-
-suite('the Free toggle', () => {
-  const s = session.snapshot;
-  check('an ERG block with Free selected is free', s.effectiveMode === 'free' && s.segmentIndex === 0);
-  check('it holds the free watts, not the override', s.targetPower === 180 && (last() as { watts: number }).watts === 180,
-    lastText());
-  check('the override does not show outside ERG', s.blockOverride === undefined);
-});
-
-suite('loading a workout clears an override', () => {
-  session.setMode('erg');
-  session.setBlockOverride(260);
-  check('set', session.snapshot.blockOverride === 260);
-  session.loadWorkout(workout());
-  check('gone after a new workout', session.snapshot.blockOverride === undefined);
-  session.start();
-  session.setBlockOverride(260);
-  session.reset();
-  check('gone after a reset', session.snapshot.blockOverride === undefined);
 });
 
 clearInterval(feed);

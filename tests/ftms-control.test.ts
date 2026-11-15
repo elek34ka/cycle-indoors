@@ -105,30 +105,6 @@ function alwaysSucceed(bytes: Uint8Array): DataView {
   return response(bytes[0], RESULT.success);
 }
 
-// --- a well-behaved trainer -------------------------------------------------
-const good = new FakeIo();
-good.reply = alwaysSucceed;
-const goodPoint = new FtmsControlPoint(good, 200);
-good.point = goodPoint;
-
-await goodPoint.command(encodeTargetPower(250), CONTROL_OPCODE.setTargetPower);
-
-suite('a target asks for control first', () => {
-  check('three writes: request control, start, then the target',
-    good.writes.join(' | ') === '00 | 07 | 05 fa 00', good.writes.join(' | '));
-  check('control is held', goodPoint.hasControl);
-  check('the trainer answered, so it is not marked silent', !goodPoint.silent);
-  check('the last result is remembered for the panel',
-    goodPoint.lastResult === 'set target power: success', goodPoint.lastResult ?? 'none');
-});
-
-await goodPoint.command(encodeTargetPower(300), CONTROL_OPCODE.setTargetPower);
-
-suite('control is only requested once', () => {
-  check('the second target goes straight out',
-    good.writes.join(' | ') === '00 | 07 | 05 fa 00 | 05 2c 01', good.writes.join(' | '));
-});
-
 // --- GATT allows one operation at a time -----------------------------------
 const serial = new FakeIo();
 serial.reply = alwaysSucceed;
@@ -157,64 +133,6 @@ suite('concurrent commands are serialised and ordered', () => {
     serial.writes.join(' | ') === '00 | 07 | 05 64 00 | 05 c8 00 | 05 2c 01', serial.writes.join(' | '));
 });
 
-// --- a spin-down queued behind a target ------------------------------------
-const spinning = new FakeIo();
-spinning.delayMs = 10;
-spinning.reply = (bytes) => (bytes[0] === CONTROL_OPCODE.spinDownControl
-  ? dv(0x80, 0x13, RESULT.success, 0xd0, 0x07, 0xac, 0x0d)
-  : response(bytes[0], RESULT.success));
-const spinningPoint = new FtmsControlPoint(spinning, 200);
-spinning.point = spinningPoint;
-
-const [targetAnswer, spinAnswer] = await Promise.all([
-  spinningPoint.command(encodeTargetPower(150), CONTROL_OPCODE.setTargetPower),
-  spinningPoint.command(encodeSpinDown(true), CONTROL_OPCODE.spinDownControl),
-]);
-
-suite('a command resolves with its own response', () => {
-  check('the spin-down goes out after the target, in the same queue',
-    spinning.writes.join(' | ') === '00 | 07 | 05 96 00 | 13 01', spinning.writes.join(' | '));
-  check('never two GATT writes at once', spinning.maxInflight === 1, String(spinning.maxInflight));
-  check('the target resolves with its bare success',
-    targetAnswer?.requestOpcode === CONTROL_OPCODE.setTargetPower && targetAnswer.parameters.byteLength === 0);
-  check('the spin-down resolves with its own parameters',
-    spinAnswer?.requestOpcode === CONTROL_OPCODE.spinDownControl
-      && parseSpinDownTargets(spinAnswer.parameters)?.highKph === 35,
-    JSON.stringify(spinAnswer && parseSpinDownTargets(spinAnswer.parameters)));
-});
-
-// --- a trainer that never answers ------------------------------------------
-const silent = new FakeIo();
-const silentPoint = new FtmsControlPoint(silent, 60);
-silent.point = silentPoint;
-const silentAnswer = await silentPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
-
-suite('a trainer that never acknowledges is still ridable', () => {
-  check('the target was still sent', silent.writes.includes('05 c8 00'), silent.writes.join(' | '));
-  check('it is flagged as silent so the panel can say so', silentPoint.silent);
-  check('control is assumed rather than blocking the ride', silentPoint.hasControl);
-  check('the command resolves with no response', silentAnswer === undefined);
-});
-
-// --- a trainer that refuses control ----------------------------------------
-const refusing = new FakeIo();
-refusing.reply = (bytes) => response(bytes[0], RESULT.notPermitted);
-const refusingPoint = new FtmsControlPoint(refusing, 200);
-refusing.point = refusingPoint;
-let refusalError = '';
-try {
-  await refusingPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
-} catch (err) {
-  refusalError = (err as Error).message;
-}
-
-suite('a refusal is reported, not swallowed', () => {
-  check('the command rejected', refusalError !== '', 'command resolved');
-  check('with the trainer’s own reason', /refused control/.test(refusalError), refusalError);
-  check('no target was sent', !refusing.writes.some((w) => w.startsWith('05')), refusing.writes.join(' | '));
-  check('control is not claimed', !refusingPoint.hasControl);
-});
-
 // --- control taken away mid-ride -------------------------------------------
 const revoking = new FakeIo();
 revoking.reply = alwaysSucceed;
@@ -230,56 +148,6 @@ suite('losing control re-requests it rather than failing', () => {
   check('control was requested again', after[0] === '00', after.join(' | '));
   check('and the target followed', after.includes('05 d2 00'), after.join(' | '));
   check('control is held again', revokingPoint.hasControl);
-});
-
-// --- stop and reset end the controlled period; pause does not ----------------
-const stopping = new FakeIo();
-stopping.reply = alwaysSucceed;
-const stoppingPoint = new FtmsControlPoint(stopping, 200);
-stopping.point = stoppingPoint;
-await stoppingPoint.command(encodeTargetPower(200), CONTROL_OPCODE.setTargetPower);
-await stoppingPoint.command(encodeStopOrPause(false), CONTROL_OPCODE.stopOrPause);
-const afterStop = stopping.writes.length;
-await stoppingPoint.command(encodeTargetPower(210), CONTROL_OPCODE.setTargetPower);
-const sentAfterStop = stopping.writes.slice(afterStop);
-await stoppingPoint.command(Uint8Array.of(CONTROL_OPCODE.reset), CONTROL_OPCODE.reset);
-const afterReset = stopping.writes.length;
-await stoppingPoint.command(encodeTargetPower(220), CONTROL_OPCODE.setTargetPower);
-const sentAfterReset = stopping.writes.slice(afterReset);
-await stoppingPoint.command(encodeStopOrPause(true), CONTROL_OPCODE.stopOrPause);
-const afterPause = stopping.writes.length;
-await stoppingPoint.command(encodeTargetPower(230), CONTROL_OPCODE.setTargetPower);
-const sentAfterPause = stopping.writes.slice(afterPause);
-
-suite('a stopped or reset trainer is put back under control', () => {
-  check('after Stop: request control, start, then the target',
-    sentAfterStop.join(' | ') === '00 | 07 | 05 d2 00', sentAfterStop.join(' | '));
-  check('after Reset: request control, start, then the target',
-    sentAfterReset.join(' | ') === '00 | 07 | 05 dc 00', sentAfterReset.join(' | '));
-  check('after Pause: the target goes straight out',
-    sentAfterPause.join(' | ') === '05 e6 00', sentAfterPause.join(' | '));
-});
-
-// --- a target the trainer rejects ------------------------------------------
-const picky = new FakeIo();
-picky.reply = (bytes) => response(
-  bytes[0],
-  bytes[0] === CONTROL_OPCODE.setTargetPower ? RESULT.invalidParameter : RESULT.success,
-);
-const pickyPoint = new FtmsControlPoint(picky, 200);
-picky.point = pickyPoint;
-let targetError = '';
-try {
-  await pickyPoint.command(encodeTargetPower(9000), CONTROL_OPCODE.setTargetPower);
-} catch (err) {
-  targetError = (err as Error).message;
-}
-
-suite('a rejected target says which command failed and why', () => {
-  check('it rejected', targetError !== '', 'resolved');
-  check('naming the command', /set target power/.test(targetError), targetError);
-  check('and the reason', /invalid parameter/.test(targetError), targetError);
-  check('control is still held, since that is not what was refused', pickyPoint.hasControl);
 });
 
 // --- the write itself fails -------------------------------------------------

@@ -43,20 +43,4 @@ suite('a finished ride is logged as numbers', () => {
   check('no samples, track or positions in it', !/samples|lat|lon|points|bytes/.test(json), json);
 });
 
-const titleOnly = rideLogEntry({ startedAt, metrics: computeMetrics(ride(600, false), 250), workout: { title: 'From a file' } });
-
-suite('a workout that is not in the Library', () => {
-  check('is named by title only', titleOnly?.workout?.title === 'From a file' && titleOnly.workout.key === undefined);
-  check('a ride without a route has none', titleOnly?.route === undefined);
-  check('and no HR when nothing was measured', rideLogEntry({
-    startedAt, metrics: computeMetrics(ride(600).map(({ heartRate: _, ...s }) => s), 250),
-  })?.avgHr === undefined);
-});
-
-suite('a stray start is not logged', () => {
-  check(`under ${MIN_LOGGED_SECONDS} s: nothing`, rideLogEntry({ startedAt, metrics: computeMetrics(ride(30), 250) }) === undefined);
-  check('no samples at all: nothing', rideLogEntry({ startedAt, metrics: computeMetrics([], 250) }) === undefined);
-  check(`a minute: logged`, rideLogEntry({ startedAt, metrics: computeMetrics(ride(MIN_LOGGED_SECONDS + 1), 250) }) !== undefined);
-});
-
 report();

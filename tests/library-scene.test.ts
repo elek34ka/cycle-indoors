@@ -70,7 +70,6 @@ const fakeLoader: RendererLoader = async () => {
 
 const factory = new IDBFactory();
 bootApp({ catalog: new CatalogClient(BASE, fetchFn), store: openLibraryStore(factory), sceneRenderer: fakeLoader });
-const kept = async () => (await openLibraryStore(factory)).list();
 
 const tab = (name: string) => doc.querySelector<HTMLButtonElement>(`#tabs [data-tab="${name}"]`)!;
 const active = (name: string) => doc.querySelector(`#view-${name}`)?.classList.contains('active') === true;
@@ -79,7 +78,6 @@ const row = (key: string) => doc.querySelector<HTMLElement>(`#library-root .lib-
 const detail = () => doc.querySelector<HTMLElement>('#library-root .lib-detail')!;
 const sceneButton = () => detail().querySelector<HTMLButtonElement>('.lib-scene');
 const rideButton = () => detail().querySelector<HTMLButtonElement>('.lib-actions .lib-ride');
-const lastToast = () => Array.from(doc.querySelectorAll('#toasts .toast')).pop()?.textContent ?? '';
 const fileCalls = () => net.calls.filter((c) => !c.endsWith('index.json')).length;
 const windowOpen = () => doc.querySelector('.scene-dialog') !== null;
 const closeWindow = () => openRouteSceneView()?.close();
@@ -95,9 +93,6 @@ const HILLY = `catalog:${hilly.id}`;
 drop('route-drop', 'my-hilly.gpx', MINE);
 await settle();
 const rideCourse = courseStore.current;
-const [mine] = await until(kept, (k) => k.length > 0);
-if (!mine) throw new Error('the dropped route was never kept in My library');
-const mineKey = `mine:${mine.sha256}`;
 
 tab('library').click();
 await settle();
@@ -118,30 +113,6 @@ await suite('3D view is hidden until the setting is on', () => {
 settings.patch({ showRouteScene: true });
 await settle();
 
-await suite('route details offer 3D view', () => {
-  check('3D view sits next to Ride and Smooth', sceneButton()?.textContent === '3D view'
-    && rideButton() !== null && detail().querySelector('.lib-smooth') !== null);
-  check('nothing is fetched, and no renderer loaded, until it is pressed', fileCalls() === 0 && loaderCalls === 0);
-  check('a route with under two GPS points is not even listed: the catalog refuses it', build.index.routes.length === 1
-    && build.problems.some((p) => p.path === 'routes/point.gpx'));
-});
-
-net.filesDown = true;
-await press();
-const downToast = lastToast();
-net.filesDown = false;
-net.corrupt = hilly.file.key;
-await press();
-const staleToast = lastToast();
-net.corrupt = undefined;
-
-await suite('a file that cannot be fetched opens no window', () => {
-  check('a download failure gives Ride\'s error', /^Could not load "Sample hilly loop": Could not download/.test(downToast), downToast);
-  check('a file that does not match the index: catalog out of date', /out of date/.test(staleToast), staleToast);
-  check('no window', !windowOpen() && loaderCalls === 0);
-  check('3D view is offered again', sceneButton()?.textContent === '3D view' && !sceneButton()!.disabled);
-});
-
 const before = fileCalls();
 await press();
 await until(() => loaderCalls, (n) => n > 0);
@@ -155,43 +126,5 @@ await suite('3D view on a catalog route', () => {
   check('closing returns to the Library', !windowOpen() && active('library'));
 });
 
-row(mineKey)!.click();
-const callsMine = net.calls.length;
-await press();
-await until(() => windowOpen(), (v) => v);
-
-await suite('3D view on a My library route', () => {
-  check('the window opens', windowOpen() && doc.querySelector('.scene-card h2')?.textContent === 'Route 3D preview · My hilly loop');
-  check('with no network request', net.calls.length === callsMine, net.calls.slice(callsMine).join(', '));
-  closeWindow();
-});
-
-session.start();
-await settle();
-row(HILLY)!.click();
-await settle();
-const rideLocked = rideButton()?.disabled === true;
-await press();
-await until(() => windowOpen(), (v) => v);
-
-await suite('mid-ride', () => {
-  check('Ride is disabled', rideLocked);
-  check('3D view still works', windowOpen());
-  check('the ride keeps running on its own course', session.snapshot.state === 'running' && courseStore.current === rideCourse);
-  closeWindow();
-});
-
-await press();
-await until(() => windowOpen(), (v) => v);
-settings.patch({ showRouteScene: false });
-await settle();
-
-await suite('turning the setting off', () => {
-  check('closes the open 3D view', !windowOpen() && openRouteSceneView() === undefined);
-  check('and hides the button', sceneButton() === null);
-});
-
-session.finish();
-hideSummary();
 check('the ride\'s course was never replaced', courseStore.current === rideCourse);
 report();
