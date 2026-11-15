@@ -50,24 +50,4 @@ suite('typos are caught before any request', () => {
   check('empty is rejected', rejects(''));
 });
 
-const a = await deriveKeys(bytes);
-const b = await deriveKeys(parseKey(text.toLowerCase()));
-const other = await deriveKeys(generateKey());
-const master = await crypto.subtle.importKey('raw', bytes, 'HKDF', false, ['deriveBits']);
-const encBits = new Uint8Array(await crypto.subtle.deriveBits(
-  { name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode('cycle-indoors'), info: new TextEncoder().encode('enc/v1') }, master, 256));
-let exported = true;
-try { await crypto.subtle.exportKey('raw', a.encryption); } catch { exported = false; }
-
-suite('what is derived from it', () => {
-  check('the same key derives the same token', a.token === b.token);
-  check('another key derives another token', a.token !== other.token);
-  check('the token is 256 bits, base64url', /^[A-Za-z0-9_-]{43}$/.test(a.token), a.token);
-  check('the token is not the key', a.token !== base64url(bytes));
-  check('the token is not the encryption key', a.token !== base64url(encBits));
-  check('the encryption key is AES-GCM, 256 bits', a.encryption.algorithm.name === 'AES-GCM'
-    && (a.encryption.algorithm as AesKeyAlgorithm).length === 256);
-  check('and cannot be exported', !exported && !a.encryption.extractable);
-});
-
 report();

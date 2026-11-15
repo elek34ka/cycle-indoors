@@ -12,7 +12,7 @@ Inspired by [Auuki](https://auuki.com/) ([source](https://github.com/dvmarinoff/
 ```sh
 npm install
 npm run dev        # http://127.0.0.1:5173
-npm test           # ~2300 checks, no browser needed
+npm test           # ~1000 checks, no browser needed
 npm run build      # typecheck + production build into dist/
 ```
 

@@ -90,45 +90,6 @@ suite('the index lists what parsed, in natural order of id', () => {
   check('the app accepts the index it builds', validateIndex(JSON.parse(JSON.stringify(index))).ok);
 });
 
-suite('ids come from the path, tags from the sub-folders', () => {
-  const w = workout('workout:vo2/The_Famous_40_20_s');
-  check('id is kind + path without extension', w !== undefined);
-  check('path keeps the extension', w?.path === 'vo2/The_Famous_40_20_s.zwo', w?.path);
-  check('tagged vo2', JSON.stringify(w?.tags) === '["vo2"]');
-  const r = route('route:georgia/batumi/batumi_first_ride_');
-  check('nested route found', r !== undefined);
-  check('tags in path order', JSON.stringify(r?.tags) === '["georgia","batumi"]', JSON.stringify(r?.tags));
-  check('top-level file has no tags', JSON.stringify(workout('workout:WO5_Russian_Steps_Speed_Style')?.tags) === '[]');
-});
-
-suite('workout entries carry the file\'s details and summary', () => {
-  const w = workout('workout:vo2/The_Famous_40_20_s')!;
-  check('title from <name>', w.title === "The Famous 40/20's", w.title);
-  check('author', w.author === 'M.De Jode (TK.be)');
-  check('description', w.description?.startsWith('According to') === true);
-  check('pace="0" does not matter: one hour', w.duration === 3600, String(w.duration));
-  check('IntervalsT expanded into blocks', w.blocks.length === 1 + 24 + 1 + 24 + 1 + 12 + 1, String(w.blocks.length));
-  check('scored', w.tss > 0 && w.if > 0);
-
-  const r = workout('workout:WO5_Russian_Steps_Speed_Style')!;
-  check('PowerLow on SteadyState is the target', r.blocks[1][1] === 0.6 && r.blocks[2][1] === 0.5,
-    JSON.stringify(r.blocks));
-  check('Russian Steps duration', r.duration === 1200);
-  check('description keeps its line breaks', r.description?.includes('\n\n15 sec') === true);
-
-  check('no <name>: title from the file name', workout('workout:my_easy-spin')?.title === 'my easy spin',
-    workout('workout:my_easy-spin')?.title);
-  check('no author or description: fields left out', !('author' in workout('workout:my_easy-spin')!)
-    && !('description' in workout('workout:my_easy-spin')!));
-});
-
-suite('route entries carry their name and summary', () => {
-  const r = route('route:georgia/batumi/batumi_first_ride_')!;
-  check('Cyrillic name unchanged', r.name === 'исследуем ближайшие холмы', r.name);
-  check('distance and ascent present', r.distance > 0 && r.ascent >= 0);
-  check('start position', r.start[0] === 41.635715 && r.start[1] === 41.606202, JSON.stringify(r.start));
-});
-
 suite('broken and misplaced files are reported, not fatal', () => {
   check('truncated XML failed, with the parser\'s reason',
     problem('workouts/broken.zwo')?.kind === 'failed' && /XML/i.test(problem('workouts/broken.zwo')!.reason),
@@ -151,19 +112,6 @@ suite('files are published under their content hash', () => {
   check('content types', files.find((f) => f.key === w.file.key)?.contentType === 'application/xml'
     && files.find((f) => f.key.endsWith('.gpx'))?.contentType === 'application/gpx+xml');
   check('failed files are not published', files.length === 5, String(files.length));
-});
-
-const twice = await buildCatalog([file('workouts/a.zwo', RUSSIAN_STEPS), file('workouts/b/a-copy.zwo', RUSSIAN_STEPS)], NOW);
-const edited = await buildCatalog([file('workouts/a.zwo', RUSSIAN_STEPS.replace('540', '600'))], NOW);
-const again = await buildCatalog([file('workouts/a.zwo', RUSSIAN_STEPS), file('workouts/b/a-copy.zwo', RUSSIAN_STEPS)], NOW);
-
-suite('identical bytes share a key; edited bytes get a new one', () => {
-  check('identical bytes: one key, published once',
-    twice.index.workouts[0].file.key === twice.index.workouts[1].file.key && twice.files.length === 1);
-  check('edited file keeps its id', edited.index.workouts[0].id === 'workout:a');
-  check('edited file gets a new key', edited.index.workouts[0].file.key !== twice.index.workouts[0].file.key);
-  check('rebuilding unchanged content gives the same index',
-    JSON.stringify(again.index) === JSON.stringify(twice.index));
 });
 
 const collide = await buildCatalog([

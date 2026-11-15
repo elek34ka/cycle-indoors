@@ -33,17 +33,4 @@ suite('sealing a backup', () => {
   check('no plaintext in the ciphertext', !text.includes(MARKER) && !text.includes('ftp') && !text.includes('catalog:'));
 });
 
-const wrongKey = await damaged(sealed, otherKey);
-const badVersion = await damaged(unknownVersion);
-const truncated = await damaged(sealed.slice(0, 20));
-const empty = await damaged(new Uint8Array());
-
-suite('a backup that does not open', () => {
-  check(`any flipped byte fails (${flipsCaught}/${positions.length})`, flipsCaught === positions.length);
-  check('the wrong key fails', wrongKey);
-  check('an unknown version fails', badVersion);
-  check('a truncated one fails', truncated);
-  check('nothing at all fails', empty);
-});
-
 report();

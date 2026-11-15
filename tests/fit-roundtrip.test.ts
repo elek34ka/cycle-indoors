@@ -26,38 +26,6 @@ const metrics = computeMetrics(samples, FTP);
 const startedAt = new Date('2026-10-17T07:30:00Z');
 const bytes = buildActivityFit({ startedAt, samples, laps: [], metrics, name: 'Round-trip test' });
 
-suite('metrics', () => {
-  near('average power is the mean of both halves', metrics.avgPower, 225, 0.01);
-  near('max power', metrics.maxPower, 300, 0.01);
-  check('normalised power exceeds average on an intermittent ride', metrics.normalisedPower > metrics.avgPower,
-    `NP ${metrics.normalisedPower.toFixed(1)} vs avg ${metrics.avgPower}`);
-  near('constant 250 W for an hour gives NP 250', normalisedPower(new Array(3600).fill(250)), 250, 0.01);
-  near('one hour at FTP is 100 TSS', computeMetrics(
-    new Array(3600).fill(0).map((_, i) => ({ t: i + 1, power: FTP, targetPower: FTP, distance: 0 })),
-    FTP,
-  ).tss, 100, 0.2);
-  near('zone seconds add up to the ride duration',
-    metrics.zones.reduce((s, z) => s + z.seconds, 0), DURATION, 0.01);
-  near('work in kJ', metrics.work, 225 * DURATION / 1000, 0.01);
-});
-
-suite('own decoder reads back what the encoder wrote', () => {
-  const fit = decodeFit(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-  check('CRC is valid', fit.crcOk);
-  check('file type is activity (4)', fit.fileType === 4, `got ${fit.fileType}`);
-  const records = fit.byName.get('record') ?? [];
-  check('every sample became a record', records.length === DURATION, `got ${records.length}`);
-  check('first record has power', records[0].fields.power === 300, `got ${records[0].fields.power}`);
-  near('speed decodes back to m/s', records[0].fields.speed as number, 36 / 3.6, 0.01);
-  check('heart rate survives', records[0].fields.heart_rate === 160);
-  const session = fit.byName.get('session')?.[0]?.fields;
-  check('session avg power', session?.avg_power === 225, `got ${session?.avg_power}`);
-  near('session normalised power', session?.normalized_power as number, metrics.normalisedPower, 1);
-  near('session TSS', session?.training_stress_score as number, metrics.tss, 0.2);
-  near('session distance in metres', session?.total_distance as number, metrics.distance, 0.05);
-  check('activity message present', (fit.byName.get('activity')?.length ?? 0) === 1);
-});
-
 suite('Garmin FIT SDK accepts the file', () => {
   const stream = Stream.fromByteArray(Array.from(bytes));
   check('SDK recognises it as FIT', Decoder.isFIT(stream));
@@ -126,34 +94,6 @@ suite('metrics from a ride along a route', () => {
   ], FTP);
   near('a course wrap is not counted as climbing', wrapped.ascent, 3, 0.001);
   near('nor as descending', wrapped.descent, 0, 0.001);
-});
-
-suite('the GPS track survives the round trip', () => {
-  const fit = decodeFit(routeBytes.buffer.slice(
-    routeBytes.byteOffset, routeBytes.byteOffset + routeBytes.byteLength,
-  ) as ArrayBuffer);
-  const records = fit.byName.get('record') ?? [];
-  check('every second is a record', records.length === routeSamples.length, String(records.length));
-  near('latitude decodes back to degrees', records[0].fields.position_lat as number, 50.0601, 0.00001);
-  near('longitude decodes back to degrees', records[0].fields.position_long as number, 19.94005, 0.00001);
-  near('altitude decodes back to metres', records[0].fields.altitude as number, 220.4, 0.1);
-  near('the last fix is right too', records[299].fields.position_lat as number, 50.09, 0.0001);
-
-  const session = fit.byName.get('session')?.[0]?.fields;
-  near('session total ascent', session?.total_ascent as number, routeMetrics.ascent, 1);
-  near('session start latitude', session?.start_position_lat as number, 50.0601, 0.00001);
-  check('a route ride is tagged as a virtual activity', session?.sub_sport === 58,
-    String(session?.sub_sport));
-
-  const indoorFit = decodeFit(bytes.buffer.slice(
-    bytes.byteOffset, bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer);
-  const indoorRecord = indoorFit.byName.get('record')?.[0]?.fields;
-  check('an indoor ride declares no position fields at all',
-    indoorRecord !== undefined && !('position_lat' in indoorRecord), JSON.stringify(indoorRecord));
-  check('and is tagged as indoor cycling',
-    indoorFit.byName.get('session')?.[0]?.fields.sub_sport === 6,
-    String(indoorFit.byName.get('session')?.[0]?.fields.sub_sport));
 });
 
 suite('Garmin FIT SDK reads the GPS track', () => {

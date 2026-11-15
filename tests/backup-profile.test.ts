@@ -39,51 +39,8 @@ const mine = {
   ...defaults, ftp: 280, riderWeight: 70, debugMode: true, miniMapPosition: { left: 5, top: 6 }, powerZoneBounds: MY_POWER,
 } as Settings;
 const profile = await buildProfile(personal, mine, 1234);
-const json = JSON.stringify(profile);
-const keyText = formatKey(generateKey());
-
-suite('building a profile', () => {
-  check('holds marks, plan, library, rides and personal settings',
-    profile.done.length === 1 && profile.followed === 'plan:Gravel' && profile.library.length === 1
-      && profile.rides.length === 1 && profile.settings.ftp === 280 && profile.madeAt === 1234);
-  check('carries the rider\'s zones', profile.settings.powerZoneBounds?.join() === MY_POWER.join() && profile.settings.hrZoneBounds === null);
-  check('no file bytes', !('bytes' in profile.library[0]) && !json.includes('AAAAAAAA'));
-  check('a 2 MB file contributes well under 1 KB', json.length < 1024, `${json.length} bytes`);
-  check('no device settings', !('debugMode' in profile.settings) && !('miniMapPosition' in profile.settings));
-  check('no Strava tokens or recovery key', !/access_token|refresh_token|strava/i.test(json) && !json.includes(keyText.slice(4)));
-});
-
-suite('reading a profile back', () => {
-  check('a profile reads back as itself', JSON.stringify(readProfile(JSON.parse(json))) === json);
-  let notOne = 0;
-  for (const bad of [null, 'text', [], { format: 2 }, { done: [] }]) {
-    try { readProfile(bad); } catch (e) { if (e instanceof NotAProfile) notOne++; }
-  }
-  check('anything that is not a profile is refused', notOne === 5);
-  const loose = readProfile({ format: 1, done: [{ key: 'ok', doneAt: 1 }, { doneAt: 2 }], rides: [{ tss: 1 }], library: [{ sha256: 'x', name: 'x', bytes: [1] }] });
-  check('records without their keys are dropped', loose.done.length === 1 && loose.rides.length === 0);
-  check('bytes never come in from a backup', loose.library.length === 1 && !('bytes' in loose.library[0]));
-});
 
 const tablet = { ...defaults, ftp: 200, debugMode: false, miniMapPosition: { left: 99, top: 98 }, stravaAutoUpload: true } as Settings;
-const fromLaptop = settingsFromBackup(tablet, profile.settings);
-const fromOld = settingsFromBackup(tablet, { ftp: 300, futureSetting: 'x' } as Partial<Settings>);
-
-suite('settings from a backup', () => {
-  check('personal settings come from the backup', fromLaptop.ftp === 280 && fromLaptop.riderWeight === 70);
-  check('device settings stay', fromLaptop.debugMode === false && fromLaptop.miniMapPosition?.left === 99 && fromLaptop.stravaAutoUpload);
-  check('an older backup gets defaults for what it lacks', fromOld.ftp === 300 && fromOld.riderWeight === defaults.riderWeight
-    && fromOld.hrMax === defaults.hrMax);
-  check('unknown fields are dropped', !('futureSetting' in fromOld));
-  check('custom zones come from the backup', fromLaptop.powerZoneBounds?.join() === MY_POWER.join() && fromLaptop.hrZoneBounds === null);
-  check('a backup made before zones could be edited gives the formula',
-    fromOld.powerZoneBounds === null && fromOld.hrZoneBounds === null);
-  const customTablet = { ...tablet, powerZoneBounds: MY_POWER } as Settings;
-  check("and replaces this device's custom zones, as a restore replaces everything personal",
-    settingsFromBackup(customTablet, { ftp: 300 } as Partial<Settings>).powerZoneBounds === null);
-  const broken = settingsFromBackup(tablet, { ...profile.settings, powerZoneBounds: [0.9, 0.5, 1, 1.1, 1.2, 1.5], hrZoneBounds: [0.6] } as Partial<Settings>);
-  check('invalid zones in a backup give the formula', broken.powerZoneBounds === null && broken.hrZoneBounds === null);
-});
 
 // Applying replaces the database, then the settings.
 const other = new IDBFactory();

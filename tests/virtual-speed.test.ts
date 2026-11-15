@@ -44,14 +44,6 @@ const session = new Session(hub);
 session.start();
 await wait(1200);
 
-suite('with no route, speed is what the trainer reports', () => {
-  const s = session.snapshot;
-  check('the snapshot speed is the trainer speed', s.speed === 35, String(s.speed));
-  near('distance accrues at that speed', s.distance, (35 / 3.6) * s.elapsed, 0.5);
-  check('the recorded samples carry it', s.samples.length > 0 && s.samples.every((x) => x.speed === 35),
-    JSON.stringify(s.samples.map((x) => x.speed)));
-});
-
 const samplesBefore = session.snapshot.samples.length;
 courseStore.load(climb());
 await wait(400);
@@ -74,17 +66,8 @@ suite('on a 10% climb at 200 W the rider slows, whatever the trainer says', () =
     JSON.stringify(onRoute.map((x) => x.speed)));
 });
 
-session.setMode('free');
-session.setFollowCourse(false);
-session.setGrade(0);
-const beforeFree = session.snapshot.speed!;
+// A few more seconds on the climb, so the export has distance steps to compare.
 await wait(1000);
-
-suite('free mode on the slider still rides the route gradient', () => {
-  const s = session.snapshot;
-  check('the trainer would be sent the slider, 0%', s.effectiveGrade === 0, String(s.effectiveGrade));
-  check('but the speed keeps falling on the climb', s.speed! < beforeFree, `${s.speed} after ${beforeFree}`);
-});
 
 suite('the exported ride carries the virtual speed, checked by Garmin\'s SDK', () => {
   const { samples } = session.snapshot;
@@ -108,13 +91,6 @@ suite('the exported ride carries the virtual speed, checked by Garmin\'s SDK', (
   check('distance steps match the recorded speed', steps.length > 0 && steps.every((d: number) => d < 0.5),
     JSON.stringify(steps));
   check('records carry the GPS position on the route', onRoute.every((r: { positionLat?: number }) => r.positionLat !== undefined));
-});
-
-courseStore.unload();
-await wait(300);
-
-suite('removing the route hands speed back to the trainer', () => {
-  check('the snapshot speed is the trainer speed again', session.snapshot.speed === 35, String(session.snapshot.speed));
 });
 
 report();

@@ -59,34 +59,3 @@ export function outAndBack(climb = 1500, grade = 8, gap = 1): LocalPoint[] {
   for (let d = climb; d >= 0; d -= 5) down.push({ x: d, z: gap, ele: 100 + (d * grade) / 100 });
   return [...up, ...turn, ...down];
 }
-
-/**
- * A hairpin: `leg` metres east, a half circle of radius `gap / 2`, `leg`
- * metres back west, `gap` metres to the south. The second leg climbs `rise`
- * metres over its length, so it ends above the first.
- */
-export function hairpin(leg = 600, gap = 30, rise = 0): LocalPoint[] {
-  const out: LocalPoint[] = [];
-  for (let d = 0; d <= leg; d += 5) out.push({ x: d, z: 0, ele: 100 });
-  const r = gap / 2;
-  for (let a = 1; a < 16; a++) {
-    const t = (a / 16) * Math.PI;
-    out.push({ x: leg + Math.sin(t) * r, z: r - Math.cos(t) * r, ele: 100 });
-  }
-  for (let d = leg; d >= 0; d -= 5) out.push({ x: d, z: gap, ele: 100 + (rise * (leg - d)) / leg });
-  return out;
-}
-
-/** A switchback: an upper road `gap` metres beside the lower one and `rise` metres above it. */
-export const switchback = (leg = 600, gap = 40, rise = 25) => hairpin(leg, gap, rise);
-
-/** Seeded random numbers, so a failing random case can be reproduced. */
-export function rng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}

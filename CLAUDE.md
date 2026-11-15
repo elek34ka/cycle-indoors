@@ -11,7 +11,7 @@ for the things the code and the README do not say.
 
 ```sh
 npm run dev      # http://127.0.0.1:5173 — run it in your own terminal, Ctrl+C stops it
-npm test         # ~1300 checks, no browser needed; must be green before any deploy
+npm test         # ~1000 checks in ~45 s, no browser needed; must be green before any deploy
 npm run build    # tsc --noEmit + vite build into dist/
 npm run catalog:build             # content/ → .catalog/, no upload
 npm run catalog:sync -- --dry-run # what a publish to R2 would do; real sync drops the flag
@@ -177,9 +177,13 @@ pair precisely so the drawing code and the hit test cannot drift apart.
 - **The suite cannot create WebGL**, so it never sees the 3D view drawn.
   Every spatial rule (where the road is, what repeats, what keeps clear of
   it, how high the land is, how the rider and camera move) belongs in a pure
-  `src/scene/` module with its own suite; the renderer only draws what they
-  decide, and the window is tested with a fake renderer. Claims about how it
-  looks need a real browser.
+  `src/scene/` module; the renderer only draws what they decide, and the
+  window is tested with a fake renderer. The 3D suites were cut back on
+  purpose (2026-11-15) to the rules that fail silently: shared tile edges, a
+  repeated stretch drawn once, the drawn gradient cap, and a long route
+  staying light. Everything else is judged by the owner in a real browser;
+  do not grow them back without being asked. Claims about how it looks need
+  a real browser.
 - **The 3D view's heights are not the ride's.** `view-profile.ts` fits drawn
   heights within ±20% and 2 points per 10 m; readouts, the climb banner and
   playback speed read `course.at(d)`. The window builds its own `Course` and
@@ -201,15 +205,15 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   adds the verge and road triangles exactly as `road-mesh.ts` splits them
   (both sides on the same diagonal, corners rounded). Scenery, the camera
   and skirts use these, never `latticeHeight` between lattice points. A
-  change to how either mesh splits a quad must change these too;
-  `scene-scenery` reads bases back from the arrays and catches it.
+  change to how either mesh splits a quad must change these too. No suite
+  catches a mismatch any more: it shows as floating or buried scenery.
 - **A pond never changes a lattice point within `POND_UNTOUCHABLE`
   (about 20 m) of any pass**: the road's footprint, flat zone, edge skirt
   and the floating check 1 m past the edge read those. A verge reads
   further, to about 34 m (`VERGE_READS`), so `vergeWidth` cuts the verge
   to 0 on any side whose reach a pond changes; the road edge then meets
   the ground as it does wherever no verge fits. Change either distance and
-  the seam measures must be re-run with ponds on.
+  the seams must be checked again in a browser with ponds on.
 - **Ponds sit by the road on purpose.** At 100–400 m the owner found
   none, and even at 30–60 m they were 0–12 px tall: the eye is 1.5 scene
   units over land drawn up to 4× taller, and the window shows only ±46°
@@ -220,9 +224,8 @@ pair precisely so the drawing code and the hit test cannot drift apart.
   - only nearly level road (`BANK_SPREAD`, `MAX_SLOPE`) getting ponds;
   - a sight lane kept clear of scenery.
 
-  `scene-ponds` measures sight lines over the drawn ground. A pond's level
-  comes from the lattice *before* ponds, so neighbours closer than
-  `separation` are both dropped; the decision reads only the neighbours'
+  A pond's level comes from the lattice *before* ponds, so neighbours
+  closer than `separation` are both dropped; the decision reads only the neighbours'
   provisional ponds, so it never depends on the order cells are asked in.
   The ground has ponds only when `buildGround` is given the route's `Land`.
 - **`forEachSegmentNear` and `forEachRoadNear` are not re-entrant**: they

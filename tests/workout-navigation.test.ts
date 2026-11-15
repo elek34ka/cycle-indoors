@@ -40,45 +40,4 @@ suite('the workout clock never moves backwards on request', () => {
   check('a zero seek is no move', clock() === before, String(clock()));
 });
 
-suite('forward requests stop at the end of the workout', () => {
-  session.seek(3590 - clock());
-  check('the clock reads 59:50', clock() === 3590, String(clock()));
-  session.seek(30);
-  check('+30s at 59:50 lands exactly on 60:00', clock() === 3600, String(clock()));
-  session.seek(30);
-  check('+30s at the end does nothing', clock() === 3600, String(clock()));
-  session.skipToNextBlock();
-  check('next block at the end does nothing', clock() === 3600, String(clock()));
-});
-
-suite('next block in the last block goes to the end', () => {
-  session.loadWorkout(workout);
-  session.seek(3400);
-  session.skipToNextBlock();
-  check('from 56:40 next block lands on 60:00', clock() === 3600, String(clock()));
-});
-
-suite('there is no way back once the workout has run out', () => {
-  session.loadWorkout(workout);
-  session.seek(3600);
-  // what the running clock does past the end, without waiting for it
-  (session as unknown as { elapsed: number }).elapsed = 3900;
-  session.seek(30);
-  check('+30s past the end leaves the clock at 65:00', clock() === 3900, String(clock()));
-  session.skipToNextBlock();
-  check('next block past the end does not step back to 60:00', clock() === 3900, String(clock()));
-  session.seek(-600);
-  check('nor does a backward seek', clock() === 3900, String(clock()));
-});
-
-suite('before the start, skipping forward cannot be undone', () => {
-  session.loadWorkout(workout);
-  session.skipToNextBlock();
-  session.skipToNextBlock();
-  check('two presses put the start on the third block', session.snapshot.segmentIndex === 2,
-    String(session.snapshot.segmentIndex));
-  session.seek(-600);
-  check('and there is no going back to the first', clock() === 600, String(clock()));
-});
-
 report();

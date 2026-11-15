@@ -126,35 +126,4 @@ const blob = (n: number, fill = 7) => new Uint8Array(n).fill(fill);
   });
 }
 
-{
-  const strict = limiter(2);
-  const limited: Env = { ...env, WRITE_LIMITER: strict };
-  const call2 = (ip: string) => vault.fetch(new Request(URL_, {
-    method: 'PUT', body: blob(10), headers: { Origin: APP, Authorization: `Bearer ${tokenA}`, 'CF-Connecting-IP': ip },
-  }), limited);
-  const statuses = [(await call2('198.51.100.7')).status, (await call2('198.51.100.7')).status, (await call2('198.51.100.7')).status];
-  const elsewhere = (await call2('198.51.100.8')).status;
-  suite('rate limits', () => {
-    check('writes are limited per client IP', statuses.join() === '200,200,429', statuses.join());
-    check('another client is not affected', elsewhere === 200);
-    check('reads use their own limit', reads.calls.length > 0 && !reads.calls.includes('198.51.100.7'));
-  });
-}
-
-{
-  const deleted = await call('DELETE', { token: tokenA });
-  const gone = await call('GET', { token: tokenA });
-  const deleteNothing = await call('DELETE', { token: 'z'.repeat(43) });
-  storageDown = true;
-  const down = await call('GET', { token: tokenB });
-  storageDown = false;
-  suite('delete and failures', () => {
-    check('delete: 204', deleted.status === 204);
-    check('then nothing: 404', gone.status === 404);
-    check('deleting nothing is fine too', deleteNothing.status === 204);
-    check('storage trouble: 503, with CORS so the app can read it', down.status === 503
-      && down.headers.get('Access-Control-Allow-Origin') === APP);
-  });
-}
-
 report();

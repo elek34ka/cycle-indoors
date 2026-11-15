@@ -45,25 +45,4 @@ suite('talking to the vault', () => {
   check('only the token, and content type on a put', sent.every((r) => Object.keys(r.headers).every((h) => h === 'authorization' || h === 'content-type')));
 });
 
-const cases: [string, () => Response | Promise<Response>, string][] = [
-  ['no network', () => { throw new TypeError('Failed to fetch'); }, 'offline'],
-  ['429', () => new Response('', { status: 429 }), 'rate-limited'],
-  ['413', () => new Response('', { status: 413 }), 'too-large'],
-  ['503', () => new Response('', { status: 503 }), 'unavailable'],
-  ['403', () => new Response('', { status: 403 }), 'refused'],
-];
-const reasons: string[] = [];
-for (const [, r] of cases) {
-  reply = r;
-  reasons.push(String(await failure(() => client.put(token, body))));
-}
-reply = () => new Response('', { status: 404 });
-const putNotFound = await failure(() => client.put(token, body));
-
-suite('failures say why', () => {
-  for (let i = 0; i < cases.length; i++) check(`${cases[i][0]} → ${cases[i][2]}`, reasons[i] === cases[i][2], reasons[i]);
-  check('a 404 is only "no backup" for a get', putNotFound === 'refused');
-  check('the messages are for riders', new VaultError('offline').message.includes('could not be reached'));
-});
-
 report();

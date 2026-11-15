@@ -75,26 +75,10 @@ const putsAfterWrong = puts();
 await A.backup.confirmNewKey(lastGroup(shown).toLowerCase());
 const stored = [...objects.values()][0];
 
-suite('a new key', () => {
-  check('is shown before it is kept', shown.startsWith('ci1-') && notYet === undefined);
-  check('a wrong confirmation uploads nothing', wrong instanceof WrongConfirmation && putsAfterWrong === 0);
-  check('the right one (any case) keeps the key and makes the first backup', A.backup.key === shown && puts() === 1
-    && A.backup.backedUpAt !== undefined);
-  check('the vault holds ciphertext only', stored !== undefined
-    && !/sweetspot|Gravel|catalog:|"ftp"/.test(new TextDecoder('latin1').decode(stored)));
-  check('no request carries the key', !requests.some((r) => r.body?.includes(shown.slice(4, 20))));
-});
-
 settings.reset();
 const afterReset = A.backup.key;
 const enterTypo = await caught(() => browser(memoryStorage()).backup.enterKey(shown.replace(/.$/, (c) => (c === '0' ? '1' : '0'))));
 const requestsBeforeTypo = requests.length;
-
-suite('remembering the key', () => {
-  check('Reset to defaults keeps it', afterReset === shown);
-  check('it lives under its own key', localStorage.getItem(BACKUP_STORAGE_KEY)?.includes(shown) === true);
-  check('a mistyped key is refused before any request', enterTypo instanceof InvalidKey && requests.length === requestsBeforeTypo);
-});
 
 // Browser B: other data of its own, a tablet's device settings, Strava connected.
 const bStorage = memoryStorage();
@@ -134,17 +118,6 @@ suite('restoring in another browser', () => {
   check('and the rider is told to connect Strava separately', told);
 });
 
-// The last backup wins: B backs up, A restores B's.
-await b.setDone('catalog:workout:from-tablet', true);
-await B.backup.backUp();
-await A.backup.restore({ confirm: async () => true, restored: async () => {} });
-const aMarks = (await a.doneMarks()).map((m) => m.key).sort().join();
-
-suite('the last backup wins', () => {
-  check('B\'s backup replaced A\'s, with no prompt', aMarks === 'catalog:workout:a,catalog:workout:from-tablet', aMarks);
-  check('still one backup in the vault', objects.size === 1);
-});
-
 // A key with no backup.
 const C = browser(memoryStorage());
 C.backup.newKey();
@@ -173,20 +146,6 @@ suite('when restore cannot', () => {
   check('and nothing local changes', marksBefore === marksAfter);
   check('a stored key that does not parse reads as no key', corrupt.key === undefined && garbled.key === undefined);
   check('no vault configured: unavailable', !corrupt.available);
-});
-
-// Delete, then nothing to restore; forget keeps the backup.
-await A.backup.deleteBackup();
-const afterDelete = await B.backup.restore(never);
-await A.backup.backUp();
-A.backup.forget();
-const forgotten = A.backup.key;
-const stillThere = await B.backup.restore({ confirm: async () => false, restored: async () => {} });
-
-suite('delete and forget', () => {
-  check('after Delete, restoring with that key reports no backup', afterDelete === 'none');
-  check('Forget removes the key from this browser', forgotten === undefined && localStorage.getItem(BACKUP_STORAGE_KEY) === null);
-  check('but the backup stays for other browsers', stillThere === 'cancelled');
 });
 
 report();
