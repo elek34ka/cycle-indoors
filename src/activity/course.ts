@@ -101,8 +101,16 @@ export class Course {
     this.totalDistance = points[points.length - 1].distance;
     this.totalAscent = ascent;
     this.totalDescent = descent;
-    this.minEle = Math.min(...smoothed);
-    this.maxEle = Math.max(...smoothed);
+    // A loop, not Math.min(...): spreading a route's worth of arguments
+    // overflows the stack past about 120k points.
+    let minEle = Infinity;
+    let maxEle = -Infinity;
+    for (const e of smoothed) {
+      if (e < minEle) minEle = e;
+      if (e > maxEle) maxEle = e;
+    }
+    this.minEle = minEle;
+    this.maxEle = maxEle;
   }
 
   indexForDistance(distance: number): number {

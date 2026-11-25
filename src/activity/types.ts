@@ -48,6 +48,20 @@ export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon
 }
 
 /** Fill in cumulative distance and derive the roll-up stats for a point list. */
+/** Math.max/min over an array without spreading it: a long track has more
+ *  points than a call can take as arguments (about 120k in V8). */
+function maxOf(values: readonly number[]): number {
+  let max = -Infinity;
+  for (const v of values) if (v > max) max = v;
+  return max;
+}
+
+function minOf(values: readonly number[]): number {
+  let min = Infinity;
+  for (const v of values) if (v < min) min = v;
+  return min;
+}
+
 export function finaliseTrack(
   name: string,
   source: ActivityTrack['source'],
@@ -99,7 +113,7 @@ export function finaliseTrack(
     if (!values.length) return { avg: undefined, max: undefined, count: 0 };
     return {
       avg: values.reduce((s, v) => s + v, 0) / values.length,
-      max: Math.max(...values),
+      max: maxOf(values),
       count: values.length,
     };
   };
@@ -109,8 +123,8 @@ export function finaliseTrack(
   const sp = stat((p) => p.speed);
 
   const times = points.map((p) => p.time).filter((t): t is number => t !== undefined);
-  const startTime = times.length ? Math.min(...times) : undefined;
-  const elapsed = times.length > 1 ? (Math.max(...times) - Math.min(...times)) / 1000 : undefined;
+  const startTime = times.length ? minOf(times) : undefined;
+  const elapsed = times.length > 1 ? (maxOf(times) - startTime!) / 1000 : undefined;
 
   return {
     name,

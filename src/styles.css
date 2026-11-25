@@ -500,6 +500,14 @@ input[type="number"], input[type="text"] {
 .mini-map.dragging .mini-map-head { cursor: grabbing; }
 .mini-map-btn:hover { background: #242c3a; color: var(--text); }
 .mini-map-canvas { height: 184px; width: 100%; background: #dfe3e8; }
+/* The rider: an HTML marker moved by CSS transform, drawn as the yellow dot
+   with a white ring the SVG circle marker was (radius 6, 2.5 px ring). */
+.mini-map-rider {
+  background: #f0c33c;
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
 
 .mini-map-show {
   background: var(--panel);

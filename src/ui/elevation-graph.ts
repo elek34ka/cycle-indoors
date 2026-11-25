@@ -32,6 +32,83 @@ export function elevationPlot(size: Size): Plot {
   };
 }
 
+/** One pixel column of the profile, or one pair of points on a route too
+ *  short to fill the plot: where it starts and ends, and what it shows. */
+export interface ProfileColumn {
+  d0: number;
+  d1: number;
+  e0: number;
+  e1: number;
+  /** the road gradient across the column, weighted by distance */
+  gradient: number;
+  /** lowest and highest elevation inside it, for the outline */
+  lo: number;
+  hi: number;
+}
+
+/**
+ * The course bucketed into the plot's pixel columns, through `xForDistance`
+ * like everything else drawn on it. Each column starts where the previous one
+ * ended, so the area and the outline stay continuous. A route with fewer
+ * point pairs than columns gets one entry per pair, exactly as it was drawn
+ * point by point. Drawing cost then depends on the plot's width only.
+ */
+export function binColumns(course: Pick<Course, 'points' | 'totalDistance'>, plot: Plot): ProfileColumn[] {
+  const pts = course.points;
+  if (pts.length < 2) return [];
+  const pair = (i: number): ProfileColumn => {
+    const a = pts[i - 1];
+    const b = pts[i];
+    return {
+      d0: a.distance, d1: b.distance, e0: a.ele, e1: b.ele,
+      gradient: (a.gradient + b.gradient) / 2, lo: Math.min(a.ele, b.ele), hi: Math.max(a.ele, b.ele),
+    };
+  };
+  const width = Math.max(1, Math.floor(plot.w));
+  const columns: ProfileColumn[] = [];
+  if (pts.length - 1 <= width) {
+    for (let i = 1; i < pts.length; i++) columns.push(pair(i));
+    return columns;
+  }
+  const total = course.totalDistance || 1;
+  let current: ProfileColumn | undefined;
+  let index = -1;
+  let gradientSum = 0;
+  let run = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const at = Math.max(0, Math.min(width - 1, Math.floor(xForDistance(a.distance, plot, total) - plot.x)));
+    if (!current || at !== index) {
+      current = pair(i);
+      index = at;
+      gradientSum = 0;
+      run = 0;
+      columns.push(current);
+    }
+    const length = b.distance - a.distance;
+    gradientSum += ((a.gradient + b.gradient) / 2) * length;
+    run += length;
+    current.d1 = b.distance;
+    current.e1 = b.ele;
+    if (b.ele < current.lo) current.lo = b.ele;
+    if (b.ele > current.hi) current.hi = b.ele;
+    if (run > 0) current.gradient = gradientSum / run;
+  }
+  return columns;
+}
+
+/** The last binning per course, so a repaint at the same width bins nothing. */
+const binned = new WeakMap<object, { width: number; columns: ProfileColumn[] }>();
+
+function columnsFor(course: Course, plot: Plot): ProfileColumn[] {
+  const cached = binned.get(course);
+  if (cached && cached.width === plot.w) return cached.columns;
+  const columns = binColumns(course, plot);
+  binned.set(course, { width: plot.w, columns });
+  return columns;
+}
+
 /** How much of one lap of the course has been ridden, 0–1. A full lap or
  *  more is 1: every part of the course was ridden at least once. */
 export function riddenFraction(ridden: number, total: number): number {
@@ -87,33 +164,52 @@ export function drawElevationProfile(ctx: CanvasRenderingContext2D, size: Size, 
   // Everything right of this x was not ridden; without a ridden distance, all of it counts as ridden.
   const riddenX = view.ridden === undefined ? Infinity : xOf(riddenFraction(view.ridden, course.totalDistance) * total);
 
-  // Area fill, one slice per pair of points, tinted by that slice's gradient.
+  // Area fill, one slice per column, tinted by its gradient. Slices of one
+  // colour (and one side of the ridden distance) share a path, so a repaint
+  // is a handful of fills however many points the route has.
   const base = p.y + p.h;
-  for (let i = 1; i < course.points.length; i++) {
-    const a = course.points[i - 1];
-    const b = course.points[i];
-    const x0 = xOf(a.distance);
-    const x1 = xOf(b.distance);
-    if (x1 - x0 < 0.05 && i < course.points.length - 1) continue;
-    ctx.fillStyle = gradientColor((a.gradient + b.gradient) / 2);
-    ctx.globalAlpha = (x0 + x1) / 2 > riddenX ? 0.55 * UNRIDDEN_ALPHA : 0.55;
+  const columns = columnsFor(course, p);
+  const groups = new Map<string, { color: string; alpha: number; slices: ProfileColumn[] }>();
+  for (const c of columns) {
+    const color = gradientColor(c.gradient);
+    const dim = (xOf(c.d0) + xOf(c.d1)) / 2 > riddenX;
+    const key = `${color}${dim ? ' dim' : ''}`;
+    let group = groups.get(key);
+    if (!group) groups.set(key, group = { color, alpha: dim ? 0.55 * UNRIDDEN_ALPHA : 0.55, slices: [] });
+    group.slices.push(c);
+  }
+  for (const group of groups.values()) {
+    ctx.fillStyle = group.color;
+    ctx.globalAlpha = group.alpha;
     ctx.beginPath();
-    ctx.moveTo(x0, base);
-    ctx.lineTo(x0, yOf(a.ele));
-    ctx.lineTo(x1, yOf(b.ele));
-    ctx.lineTo(x1, base);
-    ctx.closePath();
+    for (const c of group.slices) {
+      const x0 = xOf(c.d0);
+      const x1 = xOf(c.d1);
+      ctx.moveTo(x0, base);
+      ctx.lineTo(x0, yOf(c.e0));
+      ctx.lineTo(x1, yOf(c.e1));
+      ctx.lineTo(x1, base);
+      ctx.closePath();
+    }
     ctx.fill();
   }
   ctx.globalAlpha = 1;
 
   const outline = (alpha: number) => {
+    // Through every column; one that hides a bump within its pixel reaches
+    // its highest and lowest points at its middle, as a full stroke would.
     ctx.beginPath();
-    course.points.forEach((pt, i) => {
-      const x = xOf(pt.distance);
-      const y = yOf(pt.ele);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    columns.forEach((c, i) => {
+      const x0 = xOf(c.d0);
+      if (i === 0) ctx.moveTo(x0, yOf(c.e0)); else ctx.lineTo(x0, yOf(c.e0));
+      if (c.hi > Math.max(c.e0, c.e1) || c.lo < Math.min(c.e0, c.e1)) {
+        const mid = (x0 + xOf(c.d1)) / 2;
+        ctx.lineTo(mid, yOf(c.hi));
+        ctx.lineTo(mid, yOf(c.lo));
+      }
     });
+    const last = columns[columns.length - 1];
+    if (last) ctx.lineTo(xOf(last.d1), yOf(last.e1));
     ctx.strokeStyle = `rgba(231,236,243,${0.85 * alpha})`;
     ctx.lineWidth = 1.3;
     ctx.stroke();
@@ -269,6 +365,11 @@ export class ElevationGraph {
   private lastSnapshot: SessionSnapshot | undefined;
   private finished: { ridden: number; header: string } | undefined;
   private readonly observer: ResizeObserver;
+  /** What the canvas shows now: a tick that would draw the same is skipped.
+   *  Every input the drawing reads belongs in `drawKey`. */
+  private drawnKey: string | undefined;
+  /** false while the screen it is on is not shown: it then paints nothing */
+  private active = true;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -289,30 +390,37 @@ export class ElevationGraph {
       const x = ((e.clientX - rect.left) / rect.width) * this.width;
       this.hoverDistance = this.distanceAt(x);
       this.onHover(this.hoverDistance);
-      this.draw();
+      this.draw(true);
     });
     canvas.addEventListener('pointerleave', () => {
       this.hoverDistance = undefined;
       this.onHover(undefined);
-      this.draw();
+      this.draw(true);
     });
   }
 
   setCourse(course: Course | undefined): void {
     this.course = course;
     this.hoverDistance = undefined;
-    this.draw();
+    this.draw(true);
   }
 
   /** Show a finished ride: how far it went along the course, and a line of text above it. */
   setFinished(ridden: number, header: string): void {
     this.finished = { ridden, header };
-    this.draw();
+    this.draw(true);
   }
 
   render(snapshot: SessionSnapshot): void {
     this.lastSnapshot = snapshot;
     this.draw();
+  }
+
+  /** Whether the graph's screen is shown. Shown again, it paints at once. */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (active) this.draw(true);
   }
 
   /** Stop following the canvas's size; for a graph whose canvas is being thrown away. */
@@ -330,7 +438,7 @@ export class ElevationGraph {
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.draw();
+    this.draw(true);
   }
 
   /** Canvas x (in CSS pixels) to metres along the course. */
@@ -339,8 +447,29 @@ export class ElevationGraph {
     return distanceForX(x, elevationPlot({ width: this.width, height: this.height }), this.course.totalDistance);
   }
 
-  private draw(): void {
+  /**
+   * Everything a frame is drawn from, at the resolution it shows: the rider
+   * to the pixel and the readout as written. Ticks that leave it unchanged
+   * would paint the same picture, so they paint nothing.
+   */
+  private drawKey(position: CoursePosition | undefined): string {
+    const size = `${this.width}x${this.height}`;
+    const course = this.course;
+    if (!position || !course || !course.hasElevation) return size;
+    const p = elevationPlot({ width: this.width, height: this.height });
+    const span = Math.max(10, course.maxEle - course.minEle);
+    const x = Math.round(xForDistance(position.distance, p, course.totalDistance || 1));
+    const y = Math.round(p.y + p.h - ((position.ele - course.minEle) / span) * p.h);
+    return `${size}|${x},${y}|${Math.round(position.ele)}|${position.gradient.toFixed(1)}|${Math.round(position.totalAscent)}`;
+  }
+
+  /** Paints the profile, unless it would come out the same as now; `force` always paints. */
+  private draw(force = false): void {
     const position = this.finished ? undefined : this.lastSnapshot?.coursePosition;
+    if (!this.active) return;
+    const key = this.drawKey(position);
+    if (!force && key === this.drawnKey) return;
+    this.drawnKey = key;
     drawElevationProfile(this.ctx, { width: this.width, height: this.height }, {
       course: this.course,
       ...(position ? { rider: position } : {}),

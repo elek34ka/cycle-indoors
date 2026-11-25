@@ -82,8 +82,23 @@ await suite('3D view: opening and closing leave the ride alone', async () => {
   await ready();
   check('the renderer\'s canvas is in the window', q('.scene-stage canvas') === lastFake!.canvas);
   check('the road under the rider is built straight away', lastFake!.built.length >= 1 && lastFake!.built[0].kind === 'chunk');
+  q<HTMLButtonElement>('.scene-play')!.click();
+  const playingFrom = lastFake!.frames.length;
   tick(16, 5);
-  check('frames are drawn', lastFake!.frames.length === 5, `${lastFake!.frames.length}`);
+  check('frames are drawn while playing', lastFake!.frames.length - playingFrom === 5, `${lastFake!.frames.length - playingFrom}`);
+
+  // Paused, the picture stops changing once the road around the rider is
+  // built: no more frames until a control changes something.
+  q<HTMLButtonElement>('.scene-play')!.click();
+  for (let n = 0; n < 2000 && pending.size > 0; n++) tick(16);
+  check('a paused view settles and asks for no more frames', pending.size === 0);
+  const settled = lastFake!.frames.length;
+  tick(16, 10);
+  check('and draws nothing while it sits there', lastFake!.frames.length === settled);
+  q<HTMLButtonElement>('.scene-choice[data-group="resolution"]:not([aria-pressed="true"])')!.click();
+  tick(16, 10);
+  check('a resolution change while paused draws once more, then rests',
+    lastFake!.frames.length === settled + 1 && pending.size === 0, `${lastFake!.frames.length - settled} frames`);
   view.close();
   check('Close removes the window', q('.scene-dialog') === null && openRouteSceneView() === undefined);
   check('and frees the renderer', lastFake!.isDisposed);

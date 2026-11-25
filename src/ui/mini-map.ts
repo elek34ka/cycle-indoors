@@ -23,6 +23,11 @@ const PAN_SECONDS = 0.9;
 /** A press on the title bar becomes a drag only after this much movement, so a
  *  click or double-click never unpins the map from its corner. */
 const DRAG_THRESHOLD_PX = 3;
+/** The eased marker counts as arrived this close to the rider, and the loop
+ *  can rest until the rider moves again. */
+const SETTLE_METRES = 0.05;
+/** A marker move smaller than this on screen is not drawn. */
+const MIN_MOVE_PX = 0.25;
 
 export interface PanelPosition { left: number; top: number; }
 
@@ -50,13 +55,21 @@ export class MiniMap {
   private L: typeof LeafletNS | undefined;
   private map: LeafletNS.Map | undefined;
   private routeLayer: LeafletNS.LayerGroup | undefined;
-  private rider: LeafletNS.CircleMarker | undefined;
+  /** An HTML marker, not SVG: moving it is a CSS transform, so the route
+   *  line under it, in the SVG layer, is never redrawn on its account. */
+  private rider: LeafletNS.Marker | undefined;
+  /** where the rider marker was last drawn */
+  private drawnRider: { lat: number; lon: number } | undefined;
   private hoverMarker: LeafletNS.CircleMarker | undefined;
   private course: Course | undefined;
+  /** the course as Leaflet takes it, built once per route */
+  private latlngs: LeafletNS.LatLngTuple[] = [];
   private loading: Promise<void> | undefined;
   /** There is nothing to show without a route, so the map is not offered at
    *  all until one is loaded — and Leaflet is never even fetched. */
   private enabled = false;
+  /** false while the ride screen is not the shown tab: no frames at all then */
+  private active = true;
 
   /** where the rider actually is */
   private target: { lat: number; lon: number } | undefined;
@@ -188,6 +201,23 @@ export class MiniMap {
     });
   }
 
+  /**
+   * Whether the ride screen is the tab being shown. A hidden map does no
+   * per-frame work; shown again, it puts the rider where they are now. The
+   * rider's own show/hide choice is a separate thing and is not touched.
+   */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (!active) {
+      this.stopLoop();
+      return;
+    }
+    if (!this.enabled || !this.visible) return;
+    if (this.target) this.shown = { ...this.target };
+    this.applyVisibility(true);
+  }
+
   private get following(): boolean { return settings.current.miniMapFollow; }
 
   private setFollowing(follow: boolean): void {
@@ -250,6 +280,7 @@ export class MiniMap {
 
   setCourse(course: Course | undefined): void {
     this.course = course;
+    this.latlngs = course ? course.points.map((p) => [p.lat, p.lon] as LeafletNS.LatLngTuple) : [];
     this.target = undefined;
     this.shown = undefined;
     this.enabled = course !== undefined;
@@ -268,10 +299,11 @@ export class MiniMap {
     this.hoverMarker?.remove();
     this.routeLayer = undefined;
     this.rider = undefined;
+    this.drawnRider = undefined;
     this.hoverMarker = undefined;
     if (!this.course) return;
 
-    const latlngs = this.course.points.map((p) => [p.lat, p.lon] as LeafletNS.LatLngTuple);
+    const latlngs = this.latlngs;
     this.routeLayer = L.layerGroup([
       L.polyline(latlngs, { color: LINE_CASING, weight: 7, opacity: 0.9, lineJoin: 'round' }),
       L.polyline(latlngs, { color: LINE_COLOR, weight: 3, opacity: 1, lineJoin: 'round' }),
@@ -297,12 +329,13 @@ export class MiniMap {
     if (!L || !this.map || !this.course) return;
     // Zooming out to the whole route is an overview action: stop following.
     if (this.following) this.setFollowing(false);
-    const latlngs = this.course.points.map((p) => [p.lat, p.lon] as LeafletNS.LatLngTuple);
-    this.map.fitBounds(L.latLngBounds(latlngs).pad(0.1));
+    this.map.fitBounds(L.latLngBounds(this.latlngs).pad(0.1));
   }
 
-  /** Called as often as the ride loop runs; it only records where to aim for. */
+  /** Called as often as the ride loop runs; it only records where to aim for.
+   *  The same position again (a paused ride) wakes nothing. */
   setRider(lat: number, lon: number): void {
+    if (this.target && this.shown && this.target.lat === lat && this.target.lon === lon) return;
     this.target = { lat, lon };
     if (!this.shown) {
       // First fix for this route: go straight there rather than waiting for the
@@ -333,7 +366,7 @@ export class MiniMap {
   // ---- animation -----------------------------------------------------------
 
   private startLoop(): void {
-    if (this.raf !== undefined || !this.map || !this.visible) return;
+    if (this.raf !== undefined || !this.map || !this.visible || !this.active) return;
     this.lastFrame = undefined;
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -343,8 +376,13 @@ export class MiniMap {
     this.raf = undefined;
   }
 
+  /**
+   * One frame of easing. The loop asks for the next frame only while there
+   * is something left to do: the marker still gliding, or a pan still owed.
+   * A still rider therefore costs no frames at all; `setRider` restarts it.
+   */
   private frame = (): void => {
-    this.raf = requestAnimationFrame(this.frame);
+    this.raf = undefined;
     const now = performance.now();
     const dt = this.lastFrame === undefined ? 0 : Math.min(0.5, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
@@ -359,7 +397,9 @@ export class MiniMap {
         map.setView([this.shown.lat, this.shown.lon], map.getZoom(), { animate: false });
         this.lastPanAt = now;
       }
-    } else if (dt > 0 && jump > 0) {
+    } else if (jump <= SETTLE_METRES) {
+      this.shown = { ...this.target };
+    } else if (dt > 0) {
       const alpha = 1 - Math.exp(-dt / SMOOTH_TAU);
       this.shown = {
         lat: this.shown.lat + (this.target.lat - this.shown.lat) * alpha,
@@ -368,32 +408,43 @@ export class MiniMap {
     }
 
     this.drawRider(map, this.shown);
-    if (this.following) this.maybePan(map, this.shown, now);
+    const panOwed = this.following && this.maybePan(map, this.shown, now);
+    const arrived = this.shown.lat === this.target.lat && this.shown.lon === this.target.lon;
+    if (!arrived || panOwed) this.raf = requestAnimationFrame(this.frame);
   };
 
   private drawRider(map: LeafletNS.Map, at: { lat: number; lon: number }): void {
     const L = this.L;
     if (!L) return;
     const latlng: LeafletNS.LatLngTuple = [at.lat, at.lon];
-    if (this.rider) this.rider.setLatLng(latlng);
-    else {
-      this.rider = L.circleMarker(latlng, {
-        radius: 6, color: '#fff', weight: 2.5, fillColor: '#f0c33c', fillOpacity: 1,
+    if (this.rider) {
+      // Layer points do not move when the map pans, so this compares the
+      // marker's place on the map, not on the screen.
+      const last = this.drawnRider;
+      if (last && map.latLngToLayerPoint([last.lat, last.lon]).distanceTo(map.latLngToLayerPoint(latlng)) < MIN_MOVE_PX) return;
+      this.rider.setLatLng(latlng);
+    } else {
+      this.rider = L.marker(latlng, {
+        icon: L.divIcon({ className: 'mini-map-rider', iconSize: [15, 15] }),
+        interactive: false,
+        keyboard: false,
       }).addTo(map);
     }
+    this.drawnRider = { ...at };
   }
 
   /** Pan only once the rider has drifted out of a dead zone in the middle, and
    *  then animate it: a CSS-transform pan is smooth where a per-frame setView
-   *  snaps the whole view and reloads tiles. */
-  private maybePan(map: LeafletNS.Map, at: { lat: number; lon: number }, now: number): void {
-    if (now - this.lastPanAt < PAN_SECONDS * 1000) return;
+   *  snaps the whole view and reloads tiles. Returns whether a pan may still
+   *  be owed: one just started, or one held back by the gap between pans. */
+  private maybePan(map: LeafletNS.Map, at: { lat: number; lon: number }, now: number): boolean {
+    if (now - this.lastPanAt < PAN_SECONDS * 1000) return true;
     const size = map.getSize();
-    if (size.x === 0 || size.y === 0) return;
+    if (size.x === 0 || size.y === 0) return false;
     const point = map.latLngToContainerPoint([at.lat, at.lon]);
     const drift = Math.hypot(point.x - size.x / 2, point.y - size.y / 2);
     const deadZone = Math.max(DEAD_ZONE_MIN_PX, Math.min(size.x, size.y) * DEAD_ZONE_FRACTION);
-    if (drift <= deadZone) return;
+    if (drift <= deadZone) return false;
     this.lastPanAt = now;
     map.panTo([at.lat, at.lon], {
       animate: true,
@@ -401,6 +452,7 @@ export class MiniMap {
       easeLinearity: 0.4,
       noMoveStart: true,
     });
+    return true;
   }
 
   /** Where the map is looking, and where the rider is drawn. Read-only, and the

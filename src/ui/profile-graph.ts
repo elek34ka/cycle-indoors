@@ -309,12 +309,14 @@ function drawSegment(
     ctx.fillRect(x0, y, w, p.y + p.h - y);
     ctx.strokeStyle = 'rgba(160,174,188,0.3)';
     ctx.lineWidth = 1;
+    // One path for all the hatch lines: they never cross, so one stroke draws
+    // exactly what a stroke per line did.
+    ctx.beginPath();
     for (let s = -p.h; s < w + p.h; s += 8) {
-      ctx.beginPath();
       ctx.moveTo(x0 + s, p.y + p.h);
       ctx.lineTo(x0 + s + p.h, y);
-      ctx.stroke();
     }
+    ctx.stroke();
     ctx.restore();
     ctx.strokeStyle = isCurrent ? 'rgba(255,255,255,0.8)' : 'rgba(160,174,188,0.45)';
     ctx.lineWidth = isCurrent ? 2 : 1;
@@ -499,6 +501,11 @@ export class ProfileGraph {
   /** Downsampling the ride costs more than drawing it, and the sample count only
    *  changes once a second — so the bucketed trace is cached between frames. */
   private traceCache: { current?: TraceCache } = {};
+  /** What the canvas shows now: a tick that would draw the same is skipped.
+   *  Every input the drawing reads belongs in `drawKey`. */
+  private drawnKey: string | undefined;
+  /** false while the screen it is on is not shown: it then paints nothing */
+  private active = true;
 
   constructor(private canvas: HTMLCanvasElement, options: ProfileGraphOptions = {}) {
     const ctx = canvas.getContext('2d');
@@ -523,6 +530,22 @@ export class ProfileGraph {
 
   setWorkout(workout: Workout | undefined): void {
     this.workout = workout;
+    this.drawnKey = undefined;
+  }
+
+  /** Whether the graph's screen is shown. Shown again, it paints at once. */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (!active) return;
+    this.drawnKey = undefined;
+    if (this.lastSnapshot) this.render(this.lastSnapshot);
+  }
+
+  /** Paint on the next render even if nothing in the snapshot moved, for a
+   *  change the graph cannot see there, such as FTP, zones or smoothing. */
+  invalidate(): void {
+    this.drawnKey = undefined;
   }
 
   /** Stop following the canvas's size; for a graph whose canvas is being thrown away. */
@@ -540,6 +563,7 @@ export class ProfileGraph {
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.drawnKey = undefined;
     if (this.lastSnapshot) this.render(this.lastSnapshot);
   }
 
@@ -569,8 +593,34 @@ export class ProfileGraph {
     };
   }
 
+  /**
+   * Everything a frame is drawn from, at the resolution it shows: the cursor
+   * and the axis to the pixel. Ticks that leave it unchanged would paint the
+   * same picture, so they paint nothing.
+   */
+  private drawKey(view: GraphView, snapshot: SessionSnapshot): string {
+    const p = graphPlot({ width: this.width, height: this.height });
+    const span = view.domain.to - view.domain.from || 1;
+    const px = (t: number) => Math.round((t / span) * p.w);
+    const live = view.live;
+    return [
+      `${this.width}x${this.height}`,
+      px(view.domain.from), px(view.domain.to),
+      Math.round(Math.min(p.w, ((view.elapsed - view.domain.from) / span) * p.w)),
+      view.samples.length, view.ftp,
+      live ? `${live.segmentIndex},${live.targetPower},${live.cursor}` : '',
+      snapshot.workoutComplete,
+      view.hover ? `${view.hover.x},${view.hover.y}` : '',
+    ].join('|');
+  }
+
   render(snapshot: SessionSnapshot): void {
     this.lastSnapshot = snapshot;
-    drawWorkoutGraph(this.ctx, { width: this.width, height: this.height }, this.view(snapshot), this.traceCache);
+    if (!this.active) return;
+    const view = this.view(snapshot);
+    const key = this.drawKey(view, snapshot);
+    if (key === this.drawnKey) return;
+    this.drawnKey = key;
+    drawWorkoutGraph(this.ctx, { width: this.width, height: this.height }, view, this.traceCache);
   }
 }

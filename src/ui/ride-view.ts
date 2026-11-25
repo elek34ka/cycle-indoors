@@ -221,6 +221,8 @@ export class RideView {
     settings.on('change', () => {
       this.renderSegmentLabels();
       this.colourSegments();
+      // FTP, zones, smoothing and HR max are read from settings, not the snapshot.
+      this.graph.invalidate();
       this.render(session.snapshot);
     });
     courseStore.on('course', (c) => this.onCourseChanged(c));
@@ -621,6 +623,17 @@ export class RideView {
   }
 
   // ---- rendering -----------------------------------------------------------
+
+  /**
+   * Whether the ride screen is the tab being shown. While it is not, the ride
+   * goes on and the cheap, diffed text keeps up, but the graphs and the map
+   * draw nothing; shown again, they draw the ride as it is now.
+   */
+  setActive(active: boolean): void {
+    this.graph.setActive(active);
+    this.elevation.setActive(active);
+    this.miniMap.setActive(active);
+  }
 
   private render(s: SessionSnapshot): void {
     for (const spec of TILES) {

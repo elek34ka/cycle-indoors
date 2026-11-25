@@ -51,19 +51,27 @@ real ride or a failed upload.
 - **physics**, **virtual-speed**: speed settles where the steady-state model
   says, and on a climb the virtual speed is what the rider sees and the FIT
   records, confirmed by the SDK.
-- **course**: lap wrapping, and the elevation cursor pair
-  (`xForDistance`/`distanceForX`).
+- **course**: lap wrapping, the elevation cursor pair
+  (`xForDistance`/`distanceForX`), a 27k-point route binned into no more
+  columns (and no more fills) than the profile has room for, and a
+  200,000-point route loading at all.
 - **route-geometry**: `positionAt`.
 - **profile-graph**: the trailing 3 s average, heart-rate dropouts not
   averaged as zero, and the export keeping raw samples.
+- **ride-render-cost**: on a still ride clock, frames and ticks repaint
+  neither graph, while a new recorded second or the next block repaints the
+  workout graph once; behind another tab the ride goes on and neither graph
+  paints until the ride screen is back. A slow laptop is the only other
+  place this shows.
 - **ride-summary**, **summary-image**, **hr-zones**, **training-zones**:
   the summary's values, a route ride, time in zones against the rider's zones,
   the stats image's contents, the standard zones, which bounds are allowed,
   and saved zones checked on load.
 - **wake-lock**: the screen lock is taken again on return to the tab.
 - **mini-map**, **route-preview-map**: the map appears with a route, does not
-  move while the rider is in its dead zone, catches up outside it, and goes
-  with the route; the preview map frames a route and reports hover distance.
+  move while the rider is in its dead zone, catches up outside it, asks for
+  no frames while the rider is still or the ride screen is hidden, keeps the
+  rider out of the route's SVG, and goes with the route; the preview map frames a route and reports hover distance.
 
 ## Route smoother
 
@@ -75,12 +83,16 @@ real ride or a failed upload.
 
 ## 3D view
 
+- **startup-bundle**: what startup loads (the entry chunk and its static
+  imports) holds no `src/scene/` module, no `route-scene-view` and no
+  three.js; they are only reachable through `import()`.
 - **scene-terrain-mesh**: neighbouring tiles share their edge bit for bit.
 - **scene-passes**: an out-and-back climb is drawn once.
 - **scene-view-profile**: a 28 % ramp is drawn at 20 % or less.
 - **scene-chunks**: a 200 km route holds no more than a 20 km one.
 - **route-scene-view**: the window, with a fake renderer, leaves the ride
-  alone and says so when 3D cannot be shown.
+  alone, stops drawing once paused and settled (a control change draws one
+  more frame), and says so when 3D cannot be shown.
 - **library-scene**: the 3D view button is hidden until the setting is on,
   and opens on a catalog route.
 

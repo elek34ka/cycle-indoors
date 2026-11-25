@@ -52,6 +52,8 @@ export function bootApp(options: BootOptions = {}): void {
     }
     // the panel toggle only means something on the ride view
     qs('#toggle-sidebar').classList.toggle('hidden', name !== 'ride');
+    // A hidden ride screen keeps riding but draws nothing: no graphs, no map frames.
+    rideView.setActive(name === 'ride');
     if (name === 'library') library.open();
   };
   // The catalog is fetched when the Library opens, never here: boot must not

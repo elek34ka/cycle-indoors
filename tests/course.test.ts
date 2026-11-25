@@ -2,8 +2,9 @@ import { setupDom } from './dom-setup';
 setupDom();
 
 const { Course, gradientColor } = await import('../src/activity/course');
-const { distanceForX, xForDistance, ElevationGraph } = await import('../src/ui/elevation-graph');
+const { distanceForX, xForDistance, ElevationGraph, binColumns, drawElevationProfile, elevationPlot } = await import('../src/ui/elevation-graph');
 const { parseGpx } = await import('../src/activity/gpx');
+const { finaliseTrack, haversine } = await import('../src/activity/types');
 const { readFileSync } = await import('node:fs');
 const { check, near, report, suite } = await import('./harness');
 import type { ActivityTrack, TrackPoint } from '../src/activity/types';
@@ -53,6 +54,68 @@ suite('the elevation cursor maps to the right place on the course', () => {
     worst = Math.max(worst, Math.abs((back ?? -1) - d));
   }
   near('drawing and hit-testing agree exactly', worst, 0, 0.0001);
+});
+
+/** A long, rolling route: `n` points 6 m apart, like the owner's 27k-point routes. */
+function longTrack(n: number): ActivityTrack {
+  const points: TrackPoint[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = i * 6;
+    points.push({ lat: 41 + d / 111320, lon: 42, ele: 300 + 150 * Math.sin(d / 4000) + 5 * Math.sin(d / 90), distance: d });
+  }
+  return {
+    name: 'Long', source: 'gpx', points, distance: (n - 1) * 6, ascent: 0, descent: 0,
+    hasPower: false, hasHr: false, hasElevation: true,
+  };
+}
+
+suite('the elevation profile costs the same on a long route', () => {
+  const long = new Course(longTrack(27_000));
+  const size = { width: 1000, height: 220 };
+  const plot = elevationPlot(size);
+  const columns = binColumns(long, plot);
+  check('a 27k-point route is binned into no more columns than the plot has pixels',
+    columns.length > 0 && columns.length <= plot.w, `${columns.length} columns for ${plot.w} px`);
+  check('the columns run from the start to the finish without a gap',
+    columns[0].d0 === 0 && columns[columns.length - 1].d1 === long.totalDistance
+      && columns.every((c, i) => i === 0 || c.d0 === columns[i - 1].d1));
+  const short = new Course({ ...syntheticTrack(), points: syntheticTrack().points.filter((_, i) => i % 150 === 0) });
+  check('a 3-point route keeps one entry per pair of points',
+    short.points.length === 3 && binColumns(short, plot).length === 2, `${short.points.length} points`);
+
+  let fills = 0;
+  const ctx = new Proxy({ measureText: () => ({ width: 40 }) } as Record<string | symbol, unknown>, {
+    get: (target, name) => name in target ? target[name]
+      : name === 'fill' ? () => { fills++; } : () => {},
+    set: () => true,
+  }) as unknown as CanvasRenderingContext2D;
+  drawElevationProfile(ctx, size, { course: long, ridden: long.totalDistance / 2 });
+  check('one repaint fills at most one shape per gradient colour on each side of the ridden distance',
+    fills > 0 && fills <= 14, `${fills} fills`);
+});
+
+suite('a very long route loads', () => {
+  // 200k points spread into Math.min/max overflowed the call stack.
+  const points: TrackPoint[] = [];
+  for (let i = 0; i < 200_000; i++) {
+    points.push({ lat: 41 + i * 6 / 111320, lon: 42, ele: 300 + 150 * Math.sin(i / 700), distance: 0, time: 1_700_000_000_000 + i * 1000, power: 150 + (i % 50) });
+  }
+  let track: ActivityTrack | undefined;
+  let built: InstanceType<typeof Course> | undefined;
+  let error = '';
+  try {
+    track = finaliseTrack('Very long', 'gpx', points);
+    built = new Course(track);
+  } catch (err) { error = (err as Error).message; }
+  check('a 200,000-point track is finalised and becomes a course', built !== undefined, error);
+  if (built && track) {
+    // due north all the way, so the length is the great-circle distance end to end
+    near('its distance is the length of the track, in m', built.totalDistance, haversine(points[0], points[points.length - 1]), 1);
+    near('its lowest point', built.minEle, 150, 1);
+    near('its highest point', built.maxEle, 450, 1);
+    near('the track knows how long it took, in s', track.elapsed ?? 0, 199_999, 0.001);
+    check('and its highest power', track.maxPower === 199);
+  }
 });
 
 report();

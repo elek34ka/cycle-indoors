@@ -91,6 +91,14 @@ pair precisely so the drawing code and the hit test cannot drift apart.
 - **Chrome returns the same characteristic object after a reconnect**, so
   notification listeners stack up and every packet gets handled twice. They are
   scoped to the link with an `AbortController` in `BleDevice`.
+- **The ride screen's graphs repaint only when their redraw key changes**
+  (`drawKey` in `ProfileGraph` and `ElevationGraph`). The session ticks every
+  frame, so without the key both canvases repaint 60+ times a second. Any
+  new input a graph draws must join its key, or it goes stale on screen; a
+  change the snapshot cannot show (settings) calls `invalidate()`. The
+  elevation area and outline are drawn from `binColumns` (one entry per pixel
+  column), never point by point: a 27k-point route was 5–12k fills a paint.
+  `tests/ride-render-cost.test.ts` guards this.
 - **Lap wraps teleport the rider** to the course start, so altitude deltas over
   8 m/s are discarded when totalling ascent, in both `computeMetrics` and the
   FIT exporter.

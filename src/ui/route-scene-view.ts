@@ -258,6 +258,7 @@ export class RouteSceneView {
       if (restart) this.jumpTo(0);
     }
     this.syncPlay();
+    this.schedule();
   }
 
   private syncPlay(): void {
@@ -271,6 +272,7 @@ export class RouteSceneView {
     this.renderer?.setExaggeration(this.exaggeration);
     this.resetPose();
     this.buildAhead();
+    this.schedule();
   }
 
   /** Rebuilds every piece in the season's colours; nothing moves. */
@@ -280,11 +282,13 @@ export class RouteSceneView {
     this.planner.clear();
     this.renderer?.setSeason(season);
     this.buildAhead();
+    this.schedule();
   }
 
   private setResolution(r: Resolution): void {
     this.resolution = r;
     this.renderer?.setResolution(RESOLUTIONS[r]);
+    this.schedule();
   }
 
   private jumpToProfile(event: MouseEvent): void {
@@ -302,6 +306,7 @@ export class RouteSceneView {
     this.resetPose();
     this.buildAhead();
     this.updateReadouts();
+    this.schedule();
   }
 
   private resetPose(): void {
@@ -311,6 +316,11 @@ export class RouteSceneView {
 
   // ---- frames --------------------------------------------------------------
 
+  /**
+   * Asks for one frame. Frames keep coming only while there is something to
+   * draw (see `frame`): a paused, settled view draws nothing at all, and every
+   * control that changes the picture comes through here.
+   */
   private schedule(): void {
     if (this.closed || this.frameHandle !== undefined || !this.renderer) return;
     if (document.visibilityState === 'hidden') return;
@@ -354,12 +364,15 @@ export class RouteSceneView {
       pitch: this.pose.pitch,
       groundAt: (x, z) => (ground.surfaceAt(x, z) - ground.base) * this.exaggeration,
     });
-    this.buildOne(at.x, at.z);
+    const built = this.buildOne(at.x, at.z);
     this.renderer.render({ rider: [at.x, y, at.z], camera: view });
 
     this.sinceReadout += wall;
     if (this.sinceReadout >= READOUT_INTERVAL || dt === 0) this.updateReadouts();
-    this.schedule();
+    // Paused, the camera does not move (the pose steps only with time), so
+    // once the road around the rider is built the picture is final.
+    if (this.playback.playing || built) this.schedule();
+    else this.lastTime = undefined;
   }
 
   // ---- readouts ------------------------------------------------------------
