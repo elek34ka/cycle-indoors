@@ -1,4 +1,5 @@
 import { settings, type Settings } from '../core/settings';
+import { versionLabel } from '../core/version';
 import { el, qs, toast } from './dom';
 import { buildZoneEditor } from './zone-editor';
 
@@ -121,4 +122,7 @@ export function buildSettingsView(): void {
       },
     }),
   ]));
+
+  // Below every panel of the tab, not in the profile: it is not a setting.
+  host.parentElement?.append(el('p', { class: 'app-version', text: versionLabel() }));
 }

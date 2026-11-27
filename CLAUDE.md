@@ -44,6 +44,19 @@ Work on this project is delivered in numbered phases. Finish one completely —
 code, tests and docs — before starting the next, rather than leaving several
 half-built. Ask clarifying questions before starting something large.
 
+## Versioning
+
+Settings shows `beta <version>` (`src/core/version.ts`). The number lives
+only in `package.json`'s `version`; `APP_STAGE` holds the `beta` label.
+
+- Every change delivered to `main` bumps the patch: `0.5.0` → `0.5.1`.
+- A big change (a new tab, a new kind of storage, a finished phase) bumps
+  the minor instead, `0.5.x` → `0.6.0`. Say so in its proposal; the owner
+  confirms.
+- `beta` stays until the owner drops it.
+- Bump with `npm version <x.y.z> --no-git-tag-version`, so
+  `package-lock.json` follows.
+
 ## Verification constraints
 
 **The whole suite is designed to need no browser**, which is what makes it

@@ -136,6 +136,12 @@ settings (training zones included), ride log and My library references. It is lo
 key that only you hold. **Lose the key and the backup is gone.** Restoring
 **replaces** the profile on that device; it does not merge.
 
+### Version
+
+The bottom of the Settings tab shows the app's version, such as `beta 0.5.0`,
+so a report from a ride can be matched to the deploy it came from. The number
+lives in `package.json`.
+
 ## What leaves the browser
 
 Nothing, unless you send a ride to Strava or make a backup. A Strava upload

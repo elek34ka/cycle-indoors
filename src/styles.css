@@ -576,6 +576,7 @@ input[type="number"], input[type="text"] {
 }
 .settings-panel h2 { margin: 0; font-size: 19px; font-weight: 600; }
 .settings-panel .hint { color: var(--text-faint); font-size: 14px; margin: -8px 0 0; }
+.app-version { width: min(620px, 100%); color: var(--text-faint); font-size: 13px; text-align: center; margin: 0; }
 .backup-key {
   display: block;
   font-family: var(--mono);

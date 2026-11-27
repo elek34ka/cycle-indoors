@@ -245,6 +245,20 @@ suite('the 3D view stays unloaded unless asked for', () => {
   check('and no 3D window opened', doc.querySelector('.scene-dialog') === null);
 });
 
+// The version line is the manifest's number, and is not a setting.
+doc.querySelector<HTMLButtonElement>('#tabs [data-tab="settings"]')?.click();
+{
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+  const shown = () => doc.querySelector('#view-settings .app-version')?.textContent ?? '';
+  const before = shown();
+  Array.from(doc.querySelectorAll<HTMLButtonElement>('#settings-form button'))
+    .find((b) => b.textContent === 'Reset to defaults')?.click();
+  suite('settings shows the app version', () => {
+    check('it reads beta and the package.json version', before === `beta ${manifest.version}`, before);
+    check('Reset to defaults leaves it as it was', shown() === before, shown());
+  });
+}
+
 suite('no console errors along the way', () => {
   const unexpected = consoleErrors.filter((line) => !/leaflet|tile|jsdom|Not implemented/i.test(line));
   check('nothing was logged to console.error', unexpected.length === 0, unexpected.slice(0, 3).join(' | '));
